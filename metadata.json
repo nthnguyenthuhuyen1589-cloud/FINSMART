@@ -1,0 +1,6 @@
+{
+  "name": "FINSMART AI – Chuyên gia tư vấn tài chính cá nhân",
+  "description": "Trợ lý AI chuyên tư vấn quản lý thu nhập, chi tiêu, tiết kiệm và lập kế hoạch tài chính cá nhân cơ bản dành cho sinh viên và người mới đi làm.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
