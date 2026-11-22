@@ -107,10 +107,10 @@ export function FinancialPlansView({
       className="flex flex-col gap-6"
     >
       {/* Plan Selector & Action Toolbar */}
-      <div className="no-print flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-[#FFFEFC]/95 border border-stone-200/90 shadow-[0_6px_24px_-8px_rgba(28,25,23,0.06)] rounded-2xl p-4">
-        <div className="flex flex-col sm:flex-row sm:items-center gap-2.5 min-w-0">
-          <div className="flex items-center gap-2 shrink-0">
-            <CalendarDays className="h-4 w-4 text-[#0F766E]" aria-hidden="true" />
+      <div className="no-print flex flex-col gap-3.5 bg-[#FFFEFC]/95 border border-stone-200/90 shadow-[0_6px_24px_-8px_rgba(28,25,23,0.06)] rounded-2xl p-4 sm:p-5">
+        <div className="flex flex-col md:flex-row md:items-center gap-2.5 w-full">
+          <div className="flex items-center gap-2 shrink-0 md:w-52">
+            <CalendarDays className="h-4 w-4 text-[#0F766E] shrink-0" aria-hidden="true" />
             <label htmlFor="plan-month-filter" className="sr-only">
               Lọc theo tháng và năm
             </label>
@@ -118,7 +118,7 @@ export function FinancialPlansView({
               id="plan-month-filter"
               value={monthFilter}
               onChange={(e) => setMonthFilter(e.target.value)}
-              className="px-3 py-2 text-xs sm:text-sm font-medium bg-[#FAF8F5] border border-stone-200 rounded-xl text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#0F766E]/20 focus:border-[#0F766E]"
+              className="w-full px-3 py-2 text-xs sm:text-sm font-medium bg-[#FAF8F5] border border-stone-200 rounded-xl text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#0F766E]/20 focus:border-[#0F766E] cursor-pointer"
             >
               <option value="all">Tất cả tháng/năm ({plans.length})</option>
               {availableMonths.map((mk) => (
@@ -128,48 +128,62 @@ export function FinancialPlansView({
               ))}
             </select>
           </div>
-          <label htmlFor="plan-select" className="sr-only">
-            Chọn kế hoạch đã lưu
-          </label>
-          <select
-            id="plan-select"
-            value={activePlan.id}
-            onChange={(e) => onSelectPlan(e.target.value)}
-            className="w-full sm:w-auto sm:max-w-lg px-3.5 py-2 text-sm font-medium bg-[#FAF8F5] border border-stone-200 rounded-xl text-[#1F2937] focus:outline-none focus:ring-2 focus:ring-[#0F766E]/20 focus:border-[#0F766E]"
-          >
-            {visiblePlans.map((plan) => (
-              <option key={plan.id} value={plan.id}>
-                {plan.title} ({formatRecordDateVi(plan.planDate || plan.createdAt)})
-              </option>
-            ))}
-          </select>
+
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <label htmlFor="plan-select" className="sr-only">
+              Chọn kế hoạch đã lưu
+            </label>
+            <select
+              id="plan-select"
+              value={activePlan.id}
+              onChange={(e) => onSelectPlan(e.target.value)}
+              className="w-full min-w-0 flex-1 px-3.5 py-2 text-xs sm:text-sm font-medium bg-[#FAF8F5] border border-stone-200 rounded-xl text-[#1F2937] truncate focus:outline-none focus:ring-2 focus:ring-[#0F766E]/20 focus:border-[#0F766E] cursor-pointer"
+            >
+              {visiblePlans.map((plan) => (
+                <option key={plan.id} value={plan.id}>
+                  {plan.title} ({formatRecordDateVi(plan.planDate || plan.createdAt)})
+                </option>
+              ))}
+            </select>
+
+            <button
+              type="button"
+              onClick={() => void onDeletePlan(activePlan.id)}
+              aria-label="Xóa kế hoạch này"
+              title="Xóa kế hoạch này"
+              className="inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-red-600 bg-red-50/70 hover:bg-red-100 border border-red-200/80 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <Trash2 className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span className="hidden sm:inline">Xóa</span>
+            </button>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-3 border-t border-stone-100">
           <button
             type="button"
             onClick={() => setShowReportPreview((v) => !v)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#B45309] bg-amber-50 hover:bg-amber-100/80 border border-amber-200 rounded-xl transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer active:scale-[0.98]"
+            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 text-xs font-semibold text-[#B45309] bg-amber-50 hover:bg-amber-100/80 border border-amber-200 rounded-xl transition-all duration-200 whitespace-nowrap cursor-pointer active:scale-[0.98]"
           >
-            <FileText className="h-3.5 w-3.5" aria-hidden="true" />
+            <FileText className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             <span>{showReportPreview ? 'Xem dạng bảng' : 'Tạo báo cáo hoàn chỉnh'}</span>
           </button>
 
           <button
             type="button"
             onClick={handleDownloadMarkdown}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-xl transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer active:scale-[0.98]"
+            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 text-xs font-medium text-stone-700 bg-stone-100 hover:bg-stone-200 border border-stone-200/70 rounded-xl transition-all duration-200 whitespace-nowrap cursor-pointer active:scale-[0.98]"
           >
-            <Download className="h-3.5 w-3.5" aria-hidden="true" />
+            <Download className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             <span>Tải báo cáo (.md)</span>
           </button>
 
           <button
             type="button"
             onClick={handlePrintReport}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium text-stone-700 bg-stone-100 hover:bg-stone-200 rounded-xl transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer active:scale-[0.98]"
+            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 text-xs font-medium text-stone-700 bg-stone-100 hover:bg-stone-200 border border-stone-200/70 rounded-xl transition-all duration-200 whitespace-nowrap cursor-pointer active:scale-[0.98]"
           >
-            <Printer className="h-3.5 w-3.5" aria-hidden="true" />
+            <Printer className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             <span>In / Xuất PDF</span>
           </button>
 
@@ -180,19 +194,10 @@ export function FinancialPlansView({
                 `Tôi muốn điều chỉnh kế hoạch "${activePlan.title}". Nếu chi phí sinh hoạt thay đổi hoặc có khoản phát sinh, tôi nên phân bổ lại như thế nào?`
               )
             }
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-gradient-to-r from-[#059669] to-[#0D9488] hover:shadow-md hover:shadow-[#059669]/20 hover:-translate-y-0.5 active:scale-[0.98] rounded-xl transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer"
+            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 text-xs font-semibold text-white bg-gradient-to-r from-[#059669] to-[#0D9488] hover:shadow-md hover:shadow-[#059669]/20 active:scale-[0.98] rounded-xl transition-all duration-200 whitespace-nowrap cursor-pointer"
           >
-            <SlidersHorizontal className="h-3.5 w-3.5" aria-hidden="true" />
+            <SlidersHorizontal className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             <span>Điều chỉnh cùng chuyên gia</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => void onDeletePlan(activePlan.id)}
-            aria-label="Xóa kế hoạch này"
-            className="inline-flex items-center gap-1 px-2.5 py-2 text-xs font-medium text-red-600 hover:bg-red-50 rounded-xl transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -321,30 +326,56 @@ export function FinancialPlansView({
               </p>
             </div>
 
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 pt-5 items-stretch">
-              <div className="p-4 rounded-2xl bg-[#1F2937] text-white shadow-md shadow-stone-900/10 hover:-translate-y-0.5 transition-transform duration-200 flex flex-col justify-between">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-5 items-stretch">
+              <div className="p-4 sm:p-5 rounded-2xl bg-[#1F2937] text-white shadow-md shadow-stone-900/10 hover:-translate-y-0.5 transition-transform duration-200 flex flex-col justify-between min-h-[112px]">
                 <span className="text-xs text-stone-300 block">Thu nhập hàng tháng</span>
-                <span className="text-lg sm:text-xl font-mono tabular-nums font-bold text-white mt-2 block">
-                  {formatVnd(activePlan.monthlyIncome)}
-                </span>
+                <div className="mt-2">
+                  <span className="text-lg sm:text-xl font-mono tabular-nums font-bold text-white block">
+                    {formatVnd(activePlan.monthlyIncome)}
+                  </span>
+                  <span className="block text-[11px] text-stone-400 mt-1 tabular-nums">
+                    Ngân sách gốc 100%
+                  </span>
+                </div>
               </div>
-              <div className="p-4 rounded-2xl bg-gradient-to-br from-teal-50 to-emerald-50/40 border border-teal-200/80 hover:-translate-y-0.5 transition-transform duration-200 flex flex-col justify-between">
+              <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-teal-50 to-emerald-50/40 border border-teal-200/80 hover:-translate-y-0.5 transition-transform duration-200 flex flex-col justify-between min-h-[112px]">
                 <span className="text-xs font-semibold text-[#0F766E] block">Chi tiêu tối ưu dự kiến</span>
-                <span className="text-lg sm:text-xl font-mono tabular-nums font-bold text-[#134E4A] mt-2 block">
-                  {formatVnd(activePlan.totalExpenses)}
-                </span>
+                <div className="mt-2">
+                  <span className="text-lg sm:text-xl font-mono tabular-nums font-bold text-[#134E4A] block">
+                    {formatVnd(activePlan.totalExpenses)}
+                  </span>
+                  <span className="block text-[11px] text-stone-500 mt-1 tabular-nums">
+                    {activePlan.monthlyIncome > 0
+                      ? `${Math.round((activePlan.totalExpenses / activePlan.monthlyIncome) * 100)}% thu nhập hàng tháng`
+                      : 'Theo định mức đề xuất'}
+                  </span>
+                </div>
               </div>
-              <div className="p-4 rounded-2xl bg-gradient-to-br from-emerald-50 to-green-50/50 border border-emerald-200/80 hover:-translate-y-0.5 transition-transform duration-200 flex flex-col justify-between">
+              <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-emerald-50 to-green-50/50 border border-emerald-200/80 hover:-translate-y-0.5 transition-transform duration-200 flex flex-col justify-between min-h-[112px]">
                 <span className="text-xs font-semibold text-[#047857] block">Tiết kiệm khuyến nghị/tháng</span>
-                <span className="text-lg sm:text-xl font-mono tabular-nums font-bold text-[#059669] mt-2 block">
-                  {formatVnd(activePlan.recommendedMonthlySavings)}
-                </span>
+                <div className="mt-2">
+                  <span className="text-lg sm:text-xl font-mono tabular-nums font-bold text-[#059669] block">
+                    {formatVnd(activePlan.recommendedMonthlySavings)}
+                  </span>
+                  <span className="block text-[11px] text-stone-500 mt-1 tabular-nums">
+                    {activePlan.monthlyIncome > 0
+                      ? `${Math.round((activePlan.recommendedMonthlySavings / activePlan.monthlyIncome) * 100)}% thu nhập hàng tháng`
+                      : 'Tích lũy định kỳ'}
+                  </span>
+                </div>
               </div>
-              <div className="p-4 rounded-2xl bg-gradient-to-br from-amber-50 to-orange-50/40 border border-amber-200/80 hover:-translate-y-0.5 transition-transform duration-200 flex flex-col justify-between">
+              <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-amber-50 to-orange-50/40 border border-amber-200/80 hover:-translate-y-0.5 transition-transform duration-200 flex flex-col justify-between min-h-[112px]">
                 <span className="text-xs font-semibold text-[#B45309] block">Mục tiêu quỹ dự phòng</span>
-                <span className="text-lg sm:text-xl font-mono tabular-nums font-bold text-[#92400E] mt-2 block">
-                  {formatVnd(activePlan.emergencyFundTarget)}
-                </span>
+                <div className="mt-2">
+                  <span className="text-lg sm:text-xl font-mono tabular-nums font-bold text-[#92400E] block">
+                    {formatVnd(activePlan.emergencyFundTarget)}
+                  </span>
+                  <span className="block text-[11px] text-stone-500 mt-1 tabular-nums">
+                    {activePlan.recommendedMonthlySavings > 0
+                      ? `~${Math.ceil(activePlan.emergencyFundTarget / activePlan.recommendedMonthlySavings)} tháng tích lũy`
+                      : 'Đệm an toàn khẩn cấp'}
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -466,32 +497,34 @@ export function FinancialPlansView({
 
           {/* Action Steps & Adjustment Guidance */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
-            <section className="bg-[#FFFEFC]/95 border border-stone-200/90 shadow-[0_10px_32px_-14px_rgba(28,25,23,0.08)] rounded-2xl p-5 sm:p-6">
-              <h3 className="text-base font-bold text-[#1F2937] mb-4">
-                Lộ trình thực hiện theo tuần và tháng
-              </h3>
-              <div className="space-y-4">
-                {activePlan.actionSteps.map((step, idx) => (
-                  <div
-                    key={idx}
-                    className="pb-4 border-b border-stone-100 last:border-none last:pb-0 flex items-start gap-3"
-                  >
-                    <div className="h-6 w-6 rounded-lg bg-amber-100 text-[#B45309] text-xs font-bold flex items-center justify-center shrink-0 mt-0.5 tabular-nums">
-                      {idx + 1}
+            <section className="bg-[#FFFEFC]/95 border border-stone-200/90 shadow-[0_10px_32px_-14px_rgba(28,25,23,0.08)] rounded-2xl p-5 sm:p-6 flex flex-col justify-between gap-4">
+              <div>
+                <h3 className="text-base font-bold text-[#1F2937] mb-4">
+                  Lộ trình thực hiện theo tuần và tháng
+                </h3>
+                <div className="space-y-4">
+                  {activePlan.actionSteps.map((step, idx) => (
+                    <div
+                      key={idx}
+                      className="pb-4 border-b border-stone-100 last:border-none last:pb-0 flex items-start gap-3"
+                    >
+                      <div className="h-6 w-6 rounded-lg bg-amber-100 text-[#B45309] text-xs font-bold flex items-center justify-center shrink-0 mt-0.5 tabular-nums">
+                        {idx + 1}
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-[#0F766E]">{step.timeframe}</div>
+                        <h4 className="text-sm font-semibold text-[#1F2937] mt-0.5">{step.title}</h4>
+                        <p className="text-xs sm:text-sm text-stone-600 mt-1 leading-relaxed">
+                          {step.detail}
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <div className="text-xs font-bold text-[#0F766E]">{step.timeframe}</div>
-                      <h4 className="text-sm font-semibold text-[#1F2937] mt-0.5">{step.title}</h4>
-                      <p className="text-xs sm:text-sm text-stone-600 mt-1 leading-relaxed">
-                        {step.detail}
-                      </p>
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             </section>
 
-            <section className="bg-[#FFFEFC]/95 border border-stone-200/90 shadow-[0_10px_32px_-14px_rgba(28,25,23,0.08)] rounded-2xl p-5 sm:p-6 flex flex-col gap-5">
+            <section className="bg-[#FFFEFC]/95 border border-stone-200/90 shadow-[0_10px_32px_-14px_rgba(28,25,23,0.08)] rounded-2xl p-5 sm:p-6 flex flex-col justify-between gap-5">
               <div>
                 <h3 className="text-base font-bold text-[#1F2937] mb-2.5">
                   Phương án điều chỉnh khi tình hình thay đổi

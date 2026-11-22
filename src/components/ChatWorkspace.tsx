@@ -1,10 +1,23 @@
-import { ArrowRight, FileSpreadsheet, MessageSquarePlus, Send, User } from 'lucide-react';
+import {
+  ArrowRight,
+  Calculator,
+  Compass,
+  FileSpreadsheet,
+  MessageSquarePlus,
+  PiggyBank,
+  Scissors,
+  Send,
+  ShieldAlert,
+  ShieldCheck,
+  Trash2,
+  User,
+} from 'lucide-react';
 import { motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import advisorAvatar from '../assets/images/advisor_avatar_1794990322481.jpg';
-import type { ChatMessage, FinancialPlan } from '../types.ts';
+import type { AdvisoryMode, ChatMessage, FinancialPlan } from '../types.ts';
 import { formatDateVi } from '../utils/format.ts';
 import { DisclaimerBanner } from './DisclaimerBanner.tsx';
 
@@ -13,8 +26,12 @@ interface ChatWorkspaceProps {
   plans: FinancialPlan[];
   isSending: boolean;
   errorMessage: string | null;
-  onSendMessage: (text: string) => Promise<void>;
+  advisoryMode: AdvisoryMode;
+  onChangeAdvisoryMode: (mode: AdvisoryMode) => void;
+  onSendMessage: (text: string, overrideMode?: AdvisoryMode) => Promise<void>;
   onNewConversation: () => Promise<void>;
+  onClearHistory: () => Promise<void>;
+  isClearingHistory?: boolean;
   onOpenPlan: (planId: string) => void;
 }
 
@@ -27,6 +44,50 @@ const SUGGESTED_QUESTIONS = [
   'Làm thế nào để xây dựng kế hoạch tài chính cá nhân phù hợp với thu nhập của tôi?',
 ];
 
+const ADVISORY_MODES: Array<{
+  id: AdvisoryMode;
+  label: string;
+  quickPrompt: string;
+  icon: typeof Compass;
+}> = [
+  {
+    id: 'general',
+    label: 'Tổng quát',
+    quickPrompt: 'Hãy đánh giá tổng quan thu chi hiện tại của tôi và gợi ý cách phân bổ tối ưu.',
+    icon: Compass,
+  },
+  {
+    id: 'cut_expenses',
+    label: 'Cắt giảm chi',
+    quickPrompt: 'Dựa trên hồ sơ và chi tiêu của tôi, đâu là 3 khoản có thể cắt giảm ngay mà ít ảnh hưởng sinh hoạt nhất?',
+    icon: Scissors,
+  },
+  {
+    id: 'emergency_fund',
+    label: 'Quỹ dự phòng',
+    quickPrompt: 'Hãy tính giúp tôi mục tiêu quỹ dự phòng 3–6 tháng và lộ trình tích lũy từng tuần.',
+    icon: ShieldCheck,
+  },
+  {
+    id: 'savings_goal',
+    label: 'Mục tiêu tiết kiệm',
+    quickPrompt: 'Hãy lập lộ trình chia nhỏ mục tiêu tiết kiệm theo tuần/tháng để tôi dễ duy trì nhất.',
+    icon: PiggyBank,
+  },
+  {
+    id: 'loan_check',
+    label: 'Đánh giá vay',
+    quickPrompt: 'Tôi đang cân nhắc vay hoặc mua trả góp. Hãy phân tích ngưỡng an toàn dựa trên thu nhập hiện tại của tôi.',
+    icon: Calculator,
+  },
+  {
+    id: 'debt_recovery',
+    label: 'Gỡ rối bội chi',
+    quickPrompt: 'Chi tiêu của tôi đang có dấu hiệu vượt thu. Hãy lập phương án khắc phục trong 30 ngày tới.',
+    icon: ShieldAlert,
+  },
+];
+
 const ADVISOR_AVATAR_URL = advisorAvatar;
 
 export function ChatWorkspace({
@@ -34,17 +95,28 @@ export function ChatWorkspace({
   plans,
   isSending,
   errorMessage,
+  advisoryMode,
+  onChangeAdvisoryMode,
   onSendMessage,
   onNewConversation,
+  onClearHistory,
+  isClearingHistory = false,
   onOpenPlan,
 }: ChatWorkspaceProps) {
   const [input, setInput] = useState('');
   const [avatarFailed, setAvatarFailed] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length, isSending]);
+
+  useEffect(() => {
+    if (messages.length === 0) {
+      setShowClearConfirm(false);
+    }
+  }, [messages.length]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -107,20 +179,90 @@ export function ChatWorkspace({
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={onNewConversation}
-          disabled={isSending}
-          className="relative inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-white/12 hover:bg-white/22 border border-white/25 rounded-xl transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50 active:scale-[0.98]"
-        >
-          <MessageSquarePlus className="h-3.5 w-3.5 text-amber-200" aria-hidden="true" />
-          <span>Phiên mới</span>
-        </button>
+        <div className="relative flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => setShowClearConfirm(true)}
+            disabled={isSending || isClearingHistory || messages.length === 0}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white/95 bg-white/10 hover:bg-red-500/30 border border-white/20 rounded-xl transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed active:scale-[0.98]"
+          >
+            <Trash2 className="h-3.5 w-3.5 text-amber-200" aria-hidden="true" />
+            <span>Xóa lịch sử</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onNewConversation}
+            disabled={isSending || isClearingHistory}
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-white/12 hover:bg-white/22 border border-white/25 rounded-xl transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50 active:scale-[0.98]"
+          >
+            <MessageSquarePlus className="h-3.5 w-3.5 text-amber-200" aria-hidden="true" />
+            <span>Phiên mới</span>
+          </button>
+        </div>
       </div>
 
-      {/* Mandatory Disclaimer inside Chat Workspace */}
-      <div className="px-5 pt-3.5 bg-[#FCF9F4]">
+      {showClearConfirm && (
+        <div
+          role="alertdialog"
+          aria-label="Xác nhận xóa lịch sử trò chuyện"
+          className="px-5 py-3 bg-red-50 border-b border-red-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shrink-0"
+        >
+          <p className="text-xs sm:text-sm text-red-800 font-medium">
+            Xóa toàn bộ lịch sử trò chuyện đã lưu trên thiết bị này? Thông tin chỉ bị xóa khi bạn xác nhận.
+          </p>
+          <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+            <button
+              type="button"
+              onClick={() => setShowClearConfirm(false)}
+              disabled={isClearingHistory}
+              className="px-3 py-1.5 text-xs font-semibold text-stone-700 bg-white hover:bg-stone-100 border border-stone-200 rounded-lg transition-colors cursor-pointer"
+            >
+              Hủy
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                await onClearHistory();
+                setShowClearConfirm(false);
+              }}
+              disabled={isClearingHistory}
+              className="px-3 py-1.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors cursor-pointer disabled:opacity-60"
+            >
+              {isClearingHistory ? 'Đang xóa...' : 'Xác nhận xóa'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Mandatory Disclaimer + Advisory Modes */}
+      <div className="px-5 pt-3 pb-2.5 bg-[#FCF9F4] border-b border-stone-200/70 flex flex-col gap-2.5">
         <DisclaimerBanner compact />
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+          <span className="text-[11px] font-semibold text-stone-500 whitespace-nowrap shrink-0 mr-1">
+            Chủ đề tư vấn:
+          </span>
+          {ADVISORY_MODES.map((mode) => {
+            const Icon = mode.icon;
+            const active = advisoryMode === mode.id;
+            return (
+              <button
+                key={mode.id}
+                type="button"
+                onClick={() => onChangeAdvisoryMode(mode.id)}
+                disabled={isSending}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-medium rounded-lg border transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+                  active
+                    ? 'bg-[#0F766E] text-white border-[#0F766E] shadow-xs font-semibold'
+                    : 'bg-white text-stone-600 border-stone-200 hover:border-amber-300 hover:text-[#1F2937]'
+                }`}
+              >
+                <Icon className="h-3 w-3 shrink-0" aria-hidden="true" />
+                <span>{mode.label}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Messages Area */}
@@ -308,11 +450,29 @@ export function ChatWorkspace({
         <div ref={bottomRef} />
       </div>
 
-      {/* Chat Composer */}
-      <form
-        onSubmit={handleSubmit}
-        className="p-3.5 border-t border-stone-200/80 bg-white flex items-end gap-2.5"
-      >
+      {/* Quick Advisory Trigger Strip + Chat Composer */}
+      <div className="border-t border-stone-200/80 bg-white">
+        <div className="px-3.5 pt-2.5 pb-1 flex items-center gap-1.5 overflow-x-auto">
+          <span className="text-[11px] text-stone-500 whitespace-nowrap shrink-0">Hỏi nhanh:</span>
+          {ADVISORY_MODES.filter((m) => m.id !== 'general').map((mode) => (
+            <button
+              key={mode.id}
+              type="button"
+              disabled={isSending}
+              onClick={() => {
+                onChangeAdvisoryMode(mode.id);
+                void onSendMessage(mode.quickPrompt, mode.id);
+              }}
+              className="px-2.5 py-1 text-[11px] font-medium text-[#0F766E] bg-emerald-50/80 hover:bg-emerald-100/90 border border-emerald-200/80 rounded-lg whitespace-nowrap shrink-0 transition-colors cursor-pointer disabled:opacity-50"
+            >
+              + {mode.label}
+            </button>
+          ))}
+        </div>
+        <form
+          onSubmit={handleSubmit}
+          className="p-3.5 pt-2 flex items-end gap-2.5"
+        >
         <label htmlFor="chat-input" className="sr-only">
           Nhập câu hỏi tài chính cá nhân của bạn
         </label>
@@ -335,6 +495,7 @@ export function ChatWorkspace({
           <span>Gửi</span>
         </button>
       </form>
+      </div>
     </motion.section>
   );
 }

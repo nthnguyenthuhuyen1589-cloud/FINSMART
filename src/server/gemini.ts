@@ -1,5 +1,6 @@
 import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 import type {
+  AdvisoryMode,
   ChatMessage,
   FinancialPlan,
   FinancialProfile,
@@ -9,12 +10,21 @@ import type {
 } from '../types.ts';
 
 function getAiClient(): GoogleGenAI {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
+  const rawKey = (process.env.GEMINI_API_KEY ?? '')
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    .replace(/^GEMINI_API_KEY=/i, '')
+    .trim();
+  if (
+    !rawKey ||
+    rawKey === 'MY_GEMINI_API_KEY' ||
+    rawKey === 'YOUR_API_KEY' ||
+    rawKey === 'API_KEY_HERE'
+  ) {
     throw new Error('GEMINI_API_KEY_MISSING');
   }
   return new GoogleGenAI({
-    apiKey,
+    apiKey: rawKey,
     httpOptions: {
       headers: {
         'User-Agent': 'aistudio-build',
@@ -227,6 +237,21 @@ export interface AiConsultationResult {
 
 let hydrogenCooldownUntil = 0;
 
+function isAuthOrKeyError(error: unknown): boolean {
+  const status = (error as { status?: number })?.status;
+  if (status === 401 || status === 403) return true;
+  const msg = error instanceof Error ? error.message : String(error);
+  return (
+    msg.includes('401') ||
+    msg.includes('403') ||
+    msg.includes('UNAUTHENTICATED') ||
+    msg.includes('PERMISSION_DENIED') ||
+    msg.includes('API_KEY_INVALID') ||
+    msg.includes('API key not valid') ||
+    msg.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED')
+  );
+}
+
 function isQuotaOrRateError(error: unknown): boolean {
   const msg = error instanceof Error ? error.message : String(error);
   return msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED');
@@ -237,6 +262,21 @@ function isTransientServerError(error: unknown): boolean {
   return msg.includes('503') || msg.includes('UNAVAILABLE') || msg.includes('500');
 }
 
+const ADVISORY_MODE_GUIDANCE: Record<AdvisoryMode, string> = {
+  general:
+    'Tư vấn tổng quát cân đối thu – chi – tiết kiệm dựa trên đúng số liệu thực tế, trình bày súc tích, rõ ràng, thực tế.',
+  cut_expenses:
+    'CHUYÊN ĐỀ CẮT GIẢM CHI TIÊU: Soi kỹ từng khoản chi linh hoạt và chi thực tế trong sổ ghi chép, chỉ ra 2–3 khoản có thể cắt giảm ngay 15–30% kèm số tiền tiết kiệm được mỗi tháng.',
+  emergency_fund:
+    'CHUYÊN ĐỀ QUỸ DỰ PHÒNG: Tính chính xác mức quỹ dự phòng 3 tháng và 6 tháng chi tiêu thiết yếu, chia cột mốc nhỏ (mốc 1 triệu, mốc 1 tháng, mốc 3 tháng) và mức trích theo tuần/tháng.',
+  savings_goal:
+    'CHUYÊN ĐỀ MỤC TIÊU TIẾT KIỆM: Tính toán tốc độ tích lũy mỗi ngày/tuần/tháng để đạt mục tiêu, đề xuất phương án rút ngắn thời gian hoặc điều chỉnh kỳ hạn khả thi.',
+  loan_check:
+    'CHUYÊN ĐỀ ĐÁNH GIÁ VAY / TRẢ GÓP: Phân tích kỹ áp lực trả góp hàng tháng so với phần thu nhập dư sau chi thiết yếu (ngưỡng an toàn <= 20–25%), chỉ rõ tổng chi phí lãi và gợi ý tích lũy trước nếu rủi ro cao.',
+  debt_recovery:
+    'CHUYÊN ĐỀ GỠ RỐI BỘI CHI: Xử lý khẩn cấp tình trạng chi vượt thu, lập danh sách cắt giảm tạm thời trong 30–60 ngày tới, xử lý khoản phát sinh và đưa dòng tiền về trạng thái dương.',
+};
+
 async function generateWithFallback(
   ai: GoogleGenAI,
   params: {
@@ -246,10 +286,10 @@ async function generateWithFallback(
 ) {
   const candidates: Array<{ model: string; thinkingLevel?: ThinkingLevel }> =
     Date.now() < hydrogenCooldownUntil
-      ? [{ model: 'gemini-3.1-flash-lite', thinkingLevel: ThinkingLevel.LOW }]
+      ? [{ model: 'gemini-3.1-flash-lite', thinkingLevel: ThinkingLevel.MINIMAL }]
       : [
-          { model: 'gemini-4-hydrogen', thinkingLevel: ThinkingLevel.MEDIUM },
-          { model: 'gemini-3.1-flash-lite', thinkingLevel: ThinkingLevel.LOW },
+          { model: 'gemini-4-hydrogen', thinkingLevel: ThinkingLevel.LOW },
+          { model: 'gemini-3.1-flash-lite', thinkingLevel: ThinkingLevel.MINIMAL },
         ];
 
   let lastError: unknown;
@@ -271,12 +311,15 @@ async function generateWithFallback(
         });
       } catch (error) {
         lastError = error;
+        if (isAuthOrKeyError(error)) {
+          throw error;
+        }
         if (candidate.model === 'gemini-4-hydrogen' && isQuotaOrRateError(error)) {
           hydrogenCooldownUntil = Date.now() + 5 * 60 * 1000;
           break;
         }
         if ((isTransientServerError(error) || isQuotaOrRateError(error)) && attempt === 0) {
-          await new Promise((resolve) => setTimeout(resolve, 900));
+          await new Promise((resolve) => setTimeout(resolve, 350));
           continue;
         }
         break;
@@ -293,12 +336,32 @@ function parseJsonResponse(rawText: string | undefined): {
   hasPlan?: boolean;
   plan?: Record<string, unknown>;
 } {
-  const trimmed = (rawText ?? '{}')
+  const cleaned = (rawText ?? '')
     .trim()
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```$/i, '')
     .trim();
-  return JSON.parse(trimmed || '{}');
+
+  if (!cleaned) return {};
+
+  try {
+    return JSON.parse(cleaned);
+  } catch {
+    const startIdx = cleaned.indexOf('{');
+    const endIdx = cleaned.lastIndexOf('}');
+    if (startIdx !== -1 && endIdx > startIdx) {
+      try {
+        return JSON.parse(cleaned.slice(startIdx, endIdx + 1));
+      } catch {
+        // Fallback safely to markdown text if model output wasn't valid JSON
+      }
+    }
+    return {
+      needsMoreInfo: false,
+      replyMarkdown: cleaned,
+      hasPlan: false,
+    };
+  }
 }
 
 function normalizePlan(
@@ -354,22 +417,25 @@ export async function generateInitialConsultation(params: {
   profile: FinancialProfile;
   transactions?: TransactionItem[];
   isReanalysis?: boolean;
+  advisoryMode?: AdvisoryMode;
 }): Promise<AiConsultationResult> {
   const ai = getAiClient();
   const profileContext = formatProfileContext(params.profile, params.transactions);
+  const modeGuidance =
+    ADVISORY_MODE_GUIDANCE[params.advisoryMode ?? 'general'] ?? ADVISORY_MODE_GUIDANCE.general;
 
   const userPrompt = params.isReanalysis
-    ? `Người dùng vừa cập nhật hồ sơ tài chính và nhấn "Phân tích lại". Hãy đối chiếu lại thu nhập, chi tiêu, mục tiêu và vấn đề mới nhất của họ để đánh giá lại tình hình, điều chỉnh ngân sách và lập kế hoạch tài chính cập nhật.\n\n${profileContext}`
-    : `Người dùng vừa điền hồ sơ tài chính và nhấn "Phân tích và tư vấn". Hãy kiểm tra dữ liệu hồ sơ dưới đây. Nếu thiếu dữ liệu cốt lõi (ví dụ thu nhập bằng 0 và chưa mô tả hoàn cảnh), hãy hỏi bổ sung. Nếu đã có đủ dữ liệu, hãy phân tích hoàn cảnh, nhận xét tình hình hiện tại, đề xuất giải pháp thực tế và lập kế hoạch tài chính cụ thể.\n\n${profileContext}`;
+    ? `Người dùng vừa cập nhật hồ sơ tài chính và nhấn "Phân tích lại". Hãy đối chiếu lại thu nhập, chi tiêu, mục tiêu và vấn đề mới nhất của họ để đánh giá lại tình hình, điều chỉnh ngân sách và lập kế hoạch tài chính cập nhật.\n\nTRỌNG TÂM TƯ VẤN: ${modeGuidance}\n\n${profileContext}`
+    : `Người dùng vừa điền hồ sơ tài chính và nhấn "Phân tích và tư vấn". Hãy kiểm tra dữ liệu hồ sơ dưới đây. Nếu thiếu dữ liệu cốt lõi (ví dụ thu nhập bằng 0 và chưa mô tả hoàn cảnh), hãy hỏi bổ sung. Nếu đã có đủ dữ liệu, hãy phân tích hoàn cảnh, nhận xét tình hình hiện tại, đề xuất giải pháp thực tế và lập kế hoạch tài chính cụ thể.\n\nTRỌNG TÂM TƯ VẤN: ${modeGuidance}\n\n${profileContext}`;
 
   const response = await generateWithFallback(ai, {
     contents: userPrompt,
-    systemInstruction: SYSTEM_INSTRUCTION,
+    systemInstruction: `${SYSTEM_INSTRUCTION}\n\nƯU TIÊN TỐC ĐỘ & SÚC TÍCH: Trả lời trực diện, rõ số liệu, tối đa khoảng 350–450 từ cho replyMarkdown để người dùng đọc nhanh và dễ áp dụng.`,
   });
 
   const parsed = parseJsonResponse(response.text);
 
-  const hasPlan = Boolean(parsed.hasPlan && parsed.plan);
+  const hasPlan = Boolean(parsed.hasPlan && parsed.plan && typeof parsed.plan === 'object');
   return {
     needsMoreInfo: Boolean(parsed.needsMoreInfo),
     replyMarkdown:
@@ -383,23 +449,29 @@ export async function generateInitialConsultation(params: {
 export async function generateChatReply(params: {
   profile: FinancialProfile;
   transactions?: TransactionItem[];
-  history: ChatMessage[];
+  history: Array<Pick<ChatMessage, 'role' | 'content'>>;
   userMessage: string;
+  advisoryMode?: AdvisoryMode;
 }): Promise<AiConsultationResult> {
   const ai = getAiClient();
   const profileContext = formatProfileContext(params.profile, params.transactions);
+  const modeGuidance =
+    ADVISORY_MODE_GUIDANCE[params.advisoryMode ?? 'general'] ?? ADVISORY_MODE_GUIDANCE.general;
 
-  const recentHistory = params.history.slice(-16).map((msg) => ({
+  const recentHistory = params.history.slice(-10).map((msg) => ({
     role: msg.role === 'user' ? 'user' : 'model',
     parts: [{ text: msg.content }],
   }));
 
   const contextualSystem = `${SYSTEM_INSTRUCTION}
 
+TRỌNG TÂM TƯ VẤN HIỆN TẠI: ${modeGuidance}
+
 ${profileContext}
 
 LƯU Ý BỐI CẢNH HỘI THOẠI:
 - Luôn ghi nhớ ngữ cảnh các tin nhắn trước đó trong phiên chat này.
+- Trả lời súc tích, thực tế, dễ áp dụng ngay (khoảng 250–400 từ cho replyMarkdown nếu không cần bảng dài).
 - Nếu người dùng đưa ra số liệu mới trong tin nhắn chat (ví dụ: thu nhập thay đổi, chi phát sinh đột xuất, kịch bản giả định), hãy phân tích dựa trên số liệu mới đó và tạo/cập nhật \`plan\` (\`hasPlan: true\`) nếu phù hợp.`;
 
   const contents = [
@@ -417,7 +489,7 @@ LƯU Ý BỐI CẢNH HỘI THOẠI:
 
   const parsed = parseJsonResponse(response.text);
 
-  const hasPlan = Boolean(parsed.hasPlan && parsed.plan);
+  const hasPlan = Boolean(parsed.hasPlan && parsed.plan && typeof parsed.plan === 'object');
   return {
     needsMoreInfo: Boolean(parsed.needsMoreInfo),
     replyMarkdown:

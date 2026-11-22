@@ -11,6 +11,7 @@ import {
   PiggyBank,
   Plus,
   PlusCircle,
+  RotateCcw,
   Sparkles,
   Trash2,
   TrendingUp,
@@ -58,6 +59,8 @@ interface FinancialTrackerViewProps {
     }>
   ) => Promise<void>;
   onDeleteTransaction: (txId: string) => Promise<void>;
+  onResetTransactions: (type?: TransactionType) => Promise<void>;
+  isResettingTransactions?: boolean;
   onLoadSnapshotToProfile: (snapshot: ProfileSnapshot) => void;
   onDeleteSnapshot: (snapshotId: string) => Promise<void>;
   onGoToConsult: () => void;
@@ -126,6 +129,8 @@ export function FinancialTrackerView({
   onCreateTransaction,
   onCreateTransactionsBatch,
   onDeleteTransaction,
+  onResetTransactions,
+  isResettingTransactions = false,
   onLoadSnapshotToProfile,
   onDeleteSnapshot,
   onGoToConsult,
@@ -134,6 +139,7 @@ export function FinancialTrackerView({
   const [yearFilter, setYearFilter] = useState<string>('all');
   const [monthFilter, setMonthFilter] = useState<string>('all');
   const [txTypeFilter, setTxTypeFilter] = useState<'all' | TransactionType>('all');
+  const [resetConfirmMode, setResetConfirmMode] = useState<'savings' | 'all' | null>(null);
 
   // Form ghi nhanh giao dịch hàng ngày (hỗ trợ nhập nhiều khoản cùng lúc hoặc 1 khoản lẻ)
   const [entryMode, setEntryMode] = useState<'batch' | 'single'>('batch');
@@ -643,6 +649,16 @@ Tôi cần điều chỉnh gì trong các ngày còn lại của tháng để gi
 
           <button
             type="button"
+            onClick={() => setResetConfirmMode('all')}
+            disabled={isResettingTransactions || transactions.length === 0}
+            className="inline-flex items-center gap-1.5 px-3 py-2 text-xs sm:text-sm font-semibold text-red-600 bg-red-50 hover:bg-red-100 border border-red-200 rounded-xl transition-colors cursor-pointer whitespace-nowrap disabled:opacity-45 disabled:cursor-not-allowed"
+          >
+            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>Xóa tiết kiệm / Thu chi</span>
+          </button>
+
+          <button
+            type="button"
             onClick={onGoToConsult}
             className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs sm:text-sm font-semibold text-white bg-gradient-to-r from-[#059669] to-[#0D9488] rounded-xl shadow-sm hover:shadow-md transition-all cursor-pointer whitespace-nowrap"
           >
@@ -651,6 +667,54 @@ Tôi cần điều chỉnh gì trong các ngày còn lại của tháng để gi
           </button>
         </div>
       </section>
+
+      {resetConfirmMode && (
+        <div
+          role="alertdialog"
+          aria-label="Xác nhận xóa dữ liệu tiết kiệm và thu chi"
+          className="rounded-2xl border border-red-200 bg-red-50 px-5 py-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3"
+        >
+          <p className="text-xs sm:text-sm text-red-800 font-medium leading-relaxed">
+            {resetConfirmMode === 'savings'
+              ? 'Xóa toàn bộ các khoản đã bỏ quỹ tiết kiệm trên thiết bị này? Giao dịch thu chi khác và người dùng khác không bị ảnh hưởng.'
+              : 'Chọn phạm vi đặt lại trên thiết bị này: bạn có thể chỉ xóa mục tiết kiệm hoặc xóa toàn bộ nhật ký thu chi & tiết kiệm.'}
+          </p>
+          <div className="flex flex-wrap items-center gap-2 shrink-0 self-end md:self-auto">
+            <button
+              type="button"
+              onClick={() => setResetConfirmMode(null)}
+              disabled={isResettingTransactions}
+              className="px-3 py-1.5 text-xs font-semibold text-stone-700 bg-white hover:bg-stone-100 border border-stone-200 rounded-lg transition-colors cursor-pointer"
+            >
+              Hủy
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                await onResetTransactions('savings');
+                setResetConfirmMode(null);
+              }}
+              disabled={isResettingTransactions || totalSavedAllTime === 0}
+              className="px-3 py-1.5 text-xs font-semibold text-red-700 bg-white hover:bg-red-100 border border-red-300 rounded-lg transition-colors cursor-pointer disabled:opacity-50"
+            >
+              Chỉ xóa mục tiết kiệm
+            </button>
+            {resetConfirmMode === 'all' && (
+              <button
+                type="button"
+                onClick={async () => {
+                  await onResetTransactions();
+                  setResetConfirmMode(null);
+                }}
+                disabled={isResettingTransactions}
+                className="px-3 py-1.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors cursor-pointer disabled:opacity-60"
+              >
+                {isResettingTransactions ? 'Đang xóa...' : 'Xóa toàn bộ thu chi & tiết kiệm'}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Symmetrical 4-Column KPI Summary */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
@@ -695,7 +759,21 @@ Tôi cần điều chỉnh gì trong các ngày còn lại của tháng để gi
         </div>
 
         <div className="p-4 rounded-2xl bg-[#FFFEFC] border border-stone-200/90 shadow-xs flex flex-col justify-between">
-          <span className="text-xs font-semibold text-stone-600">Đã bỏ quỹ tiết kiệm</span>
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-semibold text-stone-600">Đã bỏ quỹ tiết kiệm</span>
+            {totalSavedAllTime > 0 && (
+              <button
+                type="button"
+                onClick={() => setResetConfirmMode('savings')}
+                disabled={isResettingTransactions}
+                title="Xóa mục quỹ tiết kiệm trên thiết bị này"
+                className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-semibold text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+              >
+                <Trash2 className="h-3 w-3" aria-hidden="true" />
+                <span>Xóa</span>
+              </button>
+            )}
+          </div>
           <div className="mt-2">
             <span className="text-xl font-mono tabular-nums font-bold text-[#0F766E]">
               {formatVnd(totalSavedAllTime)}
@@ -1017,13 +1095,13 @@ Tôi cần điều chỉnh gì trong các ngày còn lại của tháng để gi
                       showUnitHint
                       accent={txType === 'expense' ? 'sky' : 'emerald'}
                     />
-                    <div className="flex flex-wrap gap-1.5 mt-2">
+                    <div className="grid grid-cols-5 gap-1.5 mt-2">
                       {QUICK_AMOUNTS.map((q) => (
                         <button
                           key={q.value}
                           type="button"
                           onClick={() => setTxAmount(q.value)}
-                          className="px-2 py-1 text-[11px] font-medium text-stone-600 bg-stone-100 hover:bg-amber-50 hover:text-[#B45309] rounded-lg transition-colors cursor-pointer"
+                          className="py-1.5 text-[11px] font-medium text-stone-600 bg-stone-100 hover:bg-amber-50 hover:text-[#B45309] rounded-lg transition-colors text-center cursor-pointer tabular-nums"
                         >
                           {q.label}
                         </button>

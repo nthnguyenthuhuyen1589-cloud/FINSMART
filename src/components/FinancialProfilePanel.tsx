@@ -1,4 +1,4 @@
-import { Plus, RefreshCw, Save, Sparkles, Trash2, Wallet } from 'lucide-react';
+import { Plus, RefreshCw, RotateCcw, Save, Sparkles, Trash2, Wallet } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useState } from 'react';
 import type { ExpenseItem, FinancialProfile, ProfileSnapshot, UserRoleType } from '../types.ts';
@@ -11,6 +11,8 @@ interface FinancialProfilePanelProps {
   snapshots: ProfileSnapshot[];
   onChange: (updated: FinancialProfile) => void;
   onSaveProfile: (profileToSave: FinancialProfile) => Promise<void>;
+  onResetProfile: () => Promise<void>;
+  isResettingProfile?: boolean;
   onSelectSnapshot: (snapshot: ProfileSnapshot) => void;
   onDeleteSnapshot: (snapshotId: string) => Promise<void>;
   onAnalyze: (profileToAnalyze: FinancialProfile, isReanalysis: boolean) => Promise<void>;
@@ -32,6 +34,8 @@ export function FinancialProfilePanel({
   snapshots,
   onChange,
   onSaveProfile,
+  onResetProfile,
+  isResettingProfile = false,
   onSelectSnapshot,
   onDeleteSnapshot,
   onAnalyze,
@@ -40,6 +44,7 @@ export function FinancialProfilePanel({
 }: FinancialProfilePanelProps) {
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [monthsFocused, setMonthsFocused] = useState(false);
   const [monthsDraft, setMonthsDraft] = useState('');
 
@@ -121,16 +126,63 @@ export function FinancialProfilePanel({
             </p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={isSaving || isAnalyzing}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-amber-50 hover:text-[#B45309] border border-transparent hover:border-amber-200 rounded-xl transition-all duration-200 whitespace-nowrap shrink-0 disabled:opacity-50 cursor-pointer active:scale-[0.98]"
-        >
-          <Save className="h-3.5 w-3.5" aria-hidden="true" />
-          <span>{isSaving ? 'Đang lưu...' : 'Lưu hồ sơ'}</span>
-        </button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={() => setShowResetConfirm(true)}
+            disabled={isSaving || isAnalyzing || isResettingProfile}
+            title="Xóa & đặt lại mục hồ sơ về mặc định"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-semibold text-stone-600 bg-stone-100 hover:bg-red-50 hover:text-red-600 border border-transparent hover:border-red-200 rounded-xl transition-all duration-200 whitespace-nowrap shrink-0 disabled:opacity-50 cursor-pointer active:scale-[0.98]"
+          >
+            <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>Đặt lại</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleSave}
+            disabled={isSaving || isAnalyzing || isResettingProfile}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-stone-700 bg-stone-100 hover:bg-amber-50 hover:text-[#B45309] border border-transparent hover:border-amber-200 rounded-xl transition-all duration-200 whitespace-nowrap shrink-0 disabled:opacity-50 cursor-pointer active:scale-[0.98]"
+          >
+            <Save className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>{isSaving ? 'Đang lưu...' : 'Lưu hồ sơ'}</span>
+          </button>
+        </div>
       </div>
+
+      {showResetConfirm && (
+        <div
+          role="alertdialog"
+          aria-label="Xác nhận đặt lại mục hồ sơ tài chính"
+          className="px-5 py-3 bg-red-50 border-b border-red-200 flex flex-col gap-2.5 shrink-0"
+        >
+          <p className="text-xs text-red-800 font-medium leading-relaxed">
+            Xóa toàn bộ thông tin mục hồ sơ và {snapshots.length} mốc thời gian đã lưu trên thiết bị này? Thao tác này không ảnh hưởng đến người dùng khác.
+          </p>
+          <div className="flex items-center justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setShowResetConfirm(false)}
+              disabled={isResettingProfile}
+              className="px-3 py-1.5 text-xs font-semibold text-stone-700 bg-white hover:bg-stone-100 border border-stone-200 rounded-lg transition-colors cursor-pointer"
+            >
+              Hủy
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                await onResetProfile();
+                setShowResetConfirm(false);
+                setSaveMessage('Đã đặt lại mục hồ sơ trên thiết bị này về mặc định.');
+              }}
+              disabled={isResettingProfile}
+              className="px-3 py-1.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors cursor-pointer disabled:opacity-60"
+            >
+              {isResettingProfile ? 'Đang đặt lại...' : 'Xác nhận xóa hồ sơ'}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 lg:overflow-y-auto px-5 py-4 flex flex-col gap-4">
         {saveMessage && (
@@ -254,13 +306,13 @@ export function FinancialProfilePanel({
           showUnitHint
           accent="emerald"
         />
-        <div className="flex flex-wrap gap-1.5 mt-2">
+        <div className="grid grid-cols-4 gap-1.5 mt-2">
           {INCOME_PRESETS.map((preset) => (
             <button
               key={preset.value}
               type="button"
               onClick={() => updateField('monthlyIncome', preset.value)}
-              className="px-2.5 py-1 text-xs font-medium text-stone-600 bg-stone-100 hover:bg-amber-50 hover:text-[#B45309] border border-transparent hover:border-amber-200 rounded-lg transition-all whitespace-nowrap shrink-0 cursor-pointer"
+              className="px-2 py-1.5 text-xs font-medium text-stone-600 bg-stone-100 hover:bg-amber-50 hover:text-[#B45309] border border-transparent hover:border-amber-200 rounded-lg transition-all whitespace-nowrap text-center cursor-pointer"
             >
               {preset.label}
             </button>

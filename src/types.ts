@@ -1,5 +1,13 @@
 export type UserRoleType = 'Sinh viên' | 'Người mới đi làm' | 'Tự do / Khác';
 
+export type AdvisoryMode =
+  | 'general'
+  | 'cut_expenses'
+  | 'emergency_fund'
+  | 'savings_goal'
+  | 'loan_check'
+  | 'debt_recovery';
+
 export interface ExpenseItem {
   id: string;
   category: string;

@@ -1,10 +1,22 @@
-import { ArrowRight, BookOpen, CheckCircle2, ShieldCheck } from 'lucide-react';
+import {
+  ArrowRight,
+  BookOpen,
+  Calculator,
+  CheckCircle2,
+  HeartPulse,
+  PiggyBank,
+  ShieldCheck,
+} from 'lucide-react';
 import { motion } from 'motion/react';
 import { useState } from 'react';
+import type { AdvisoryMode, FinancialProfile } from '../types.ts';
+import { formatVnd } from '../utils/format.ts';
 import { DisclaimerBanner } from './DisclaimerBanner.tsx';
+import { MoneyInput } from './MoneyInput.tsx';
 
 interface FinancialGuideViewProps {
-  onAskScenario: (prompt: string) => void;
+  profile?: FinancialProfile;
+  onAskScenario: (prompt: string, mode?: AdvisoryMode) => void;
 }
 
 type ScenarioGroup = 'all' | 'student' | 'early_career' | 'crisis';
@@ -110,6 +122,66 @@ const SCENARIOS: GuideScenario[] = [
     prompt:
       'Tôi muốn xây dựng quỹ dự phòng cá nhân từ con số 0 mà không bị áp lực quá lớn lên sinh hoạt hàng tháng. Tôi nên bắt đầu thế nào?',
   },
+  {
+    id: 'tuition-support',
+    group: 'early_career',
+    groupLabel: 'Người mới đi làm',
+    title: 'Vừa đi làm vừa trả nợ học phí hoặc gửi tiền hỗ trợ gia đình',
+    situation:
+      'Khoản cố định hàng tháng cộng thêm nghĩa vụ gia đình khiến bạn dễ chần chừ không dám dành tiền cho bản thân.',
+    keyTakeaways: [
+      'Cố định một tỷ lệ hỗ trợ/trả nợ rõ ràng ngay khi nhận lương để không vượt khả năng.',
+      'Giữ lại ít nhất 5–10% thu nhập cho quỹ dự phòng cá nhân để không phải vay lại khi ốm đau.',
+      'Trao đổi minh bạch với gia đình khi có thay đổi thu nhập đột xuất.',
+    ],
+    prompt:
+      'Tôi mới đi làm và cần trích một phần lương hàng tháng để trả nợ học phí/hỗ trợ gia đình. Hãy giúp tôi cân đối sao cho vẫn giữ được quỹ dự phòng tối thiểu.',
+  },
+  {
+    id: 'bonus-windfall',
+    group: 'crisis',
+    groupLabel: 'Tối ưu nguồn thu',
+    title: 'Phân bổ khoản thưởng cuối năm hoặc tiền thu thêm đột xuất',
+    situation:
+      'Tiền thưởng hoặc thu nhập bất ngờ thường dễ bị tiêu hết vào mua sắm cảm tính chỉ trong vài tuần.',
+    keyTakeaways: [
+      'Chia theo quy tắc an toàn: 50% bù quỹ dự phòng/mục tiêu lớn, 30% chi phí cần thiết sắp tới, 20% tự thưởng bản thân.',
+      'Ưu tiên xử lý các khoản nợ ngắn hạn hoặc chi phí định kỳ lớn (bảo hiểm, học phí) trước.',
+      'Chuyển ngay phần tích lũy sang tài khoản riêng trong ngày nhận tiền.',
+    ],
+    prompt:
+      'Tôi sắp có một khoản tiền thưởng/thu thêm đột xuất. Hãy gợi ý cho tôi cách phân bổ hợp lý giữa quỹ dự phòng, mục tiêu lớn và chi tiêu cá nhân.',
+  },
+  {
+    id: 'subscription-audit',
+    group: 'early_career',
+    groupLabel: 'Người mới đi làm',
+    title: 'Kiểm soát chi phí cố định ngầm & dịch vụ định kỳ hàng tháng',
+    situation:
+      'Các gói ứng dụng, tập gym, mua sắm trả sau nhỏ lẻ cộng lại dễ chiếm 10–15% thu nhập mà không để ý.',
+    keyTakeaways: [
+      'Liệt kê toàn bộ khoản trừ tự động mỗi tháng và cắt bỏ ngay dịch vụ dùng dưới 2 lần/tháng.',
+      'Chuyển phần tiền tiết kiệm được từ việc cắt gói thừa sang hũ dự phòng tự động.',
+      'Đặt hạn mức chi tiêu không thiết yếu theo tuần để dễ theo dõi.',
+    ],
+    prompt:
+      'Tôi cảm thấy tiền lương hàng tháng hay bị hao hụt vào nhiều khoản đăng ký dịch vụ và chi tiêu nhỏ lẻ. Hãy hướng dẫn tôi rà soát và cắt giảm hiệu quả.',
+  },
+  {
+    id: 'medical-family-unexpected',
+    group: 'crisis',
+    groupLabel: 'Xử lý tình huống',
+    title: 'Ứng phó khi phải chi khoản lớn đột xuất cho sức khỏe hoặc gia đình',
+    situation:
+      'Sau một khoản chi khẩn cấp lớn, quỹ dự phòng bị rút cạn và dòng tiền tháng hiện tại bị đảo lộn.',
+    keyTakeaways: [
+      'Không hoảng loạn hay vay nóng lãi cao; ưu tiên rà soát các khoản có thể giãn tiến độ.',
+      'Kích hoạt chế độ ngân sách tối giản trong 30–60 ngày để lấp lại mốc dự phòng đầu tiên.',
+      'Chia nhỏ lộ trình bù quỹ theo tuần để sớm khôi phục cảm giác an toàn.',
+    ],
+    prompt:
+      'Tôi vừa phải chi một khoản lớn đột xuất khiến ngân sách bị hụt mạnh. Hãy lập giúp tôi phương án phục hồi tài chính trong 60 ngày tới.',
+  },
 ];
 
 const SAFETY_PRINCIPLES = [
@@ -119,8 +191,75 @@ const SAFETY_PRINCIPLES = [
   'Mọi kế hoạch ngân sách đều mang tính linh hoạt: hãy điều chỉnh kịp thời khi thu nhập hoặc hoàn cảnh thay đổi.',
 ];
 
-export function FinancialGuideView({ onAskScenario }: FinancialGuideViewProps) {
+export function FinancialGuideView({ profile, onAskScenario }: FinancialGuideViewProps) {
   const [group, setGroup] = useState<ScenarioGroup>('all');
+
+  // Tool 1: Instant Health Check (defaults from profile if available)
+  const profileEssential = (profile?.expenses ?? [])
+    .filter((e) => e.isEssential)
+    .reduce((sum, e) => sum + (e.amount || 0), 0);
+  const profileFlexible = (profile?.expenses ?? [])
+    .filter((e) => !e.isEssential)
+    .reduce((sum, e) => sum + (e.amount || 0), 0);
+
+  const [healthIncome, setHealthIncome] = useState<number>(profile?.monthlyIncome || 5_000_000);
+  const [healthEssential, setHealthEssential] = useState<number>(
+    profileEssential > 0 ? profileEssential : 2_800_000
+  );
+  const [healthFlexible, setHealthFlexible] = useState<number>(
+    profileFlexible > 0 ? profileFlexible : 1_200_000
+  );
+
+  // Tool 2: Loan / Installment Safety Check
+  const [loanAmount, setLoanAmount] = useState<number>(15_000_000);
+  const [loanMonths, setLoanMonths] = useState<number>(12);
+  const [loanAnnualRate, setLoanAnnualRate] = useState<number>(14);
+
+  // Tool 3: Savings Goal Speed Planner
+  const [goalAmount, setGoalAmount] = useState<number>(
+    profile?.targetAmount && profile.targetAmount > 0 ? profile.targetAmount : 12_000_000
+  );
+  const [goalAlreadySaved, setGoalAlreadySaved] = useState<number>(0);
+  const [goalMonthlySave, setGoalMonthlySave] = useState<number>(1_500_000);
+
+  // Computed metrics for Tool 1
+  const totalHealthOut = healthEssential + healthFlexible;
+  const healthSurplus = healthIncome - totalHealthOut;
+  const essentialPct = healthIncome > 0 ? Math.round((healthEssential / healthIncome) * 100) : 0;
+  const savingsPct = healthIncome > 0 ? Math.round((healthSurplus / healthIncome) * 100) : 0;
+  const healthStatus =
+    healthIncome <= 0
+      ? 'Chưa có thu nhập'
+      : healthSurplus < 0
+        ? 'Đang bội chi'
+        : savingsPct >= 20 && essentialPct <= 60
+          ? 'Cân đối tốt'
+          : 'Cần tối ưu thêm';
+
+  // Computed metrics for Tool 2
+  const safeMonths = Math.max(1, loanMonths);
+  const monthlyRate = Math.max(0, loanAnnualRate) / 100 / 12;
+  const monthlyInstallment =
+    loanAmount <= 0
+      ? 0
+      : monthlyRate === 0
+        ? Math.round(loanAmount / safeMonths)
+        : Math.round(
+            (loanAmount * monthlyRate * Math.pow(1 + monthlyRate, safeMonths)) /
+              (Math.pow(1 + monthlyRate, safeMonths) - 1)
+          );
+  const totalRepayment = monthlyInstallment * safeMonths;
+  const totalInterest = Math.max(0, totalRepayment - loanAmount);
+  const loanToSurplusPct =
+    healthSurplus > 0 ? Math.round((monthlyInstallment / healthSurplus) * 100) : 999;
+
+  // Computed metrics for Tool 3
+  const remainingGoalAmount = Math.max(0, goalAmount - goalAlreadySaved);
+  const monthsNeeded =
+    remainingGoalAmount > 0 && goalMonthlySave > 0
+      ? Math.ceil(remainingGoalAmount / goalMonthlySave)
+      : 0;
+  const weeklyNeeded = goalMonthlySave > 0 ? Math.round(goalMonthlySave / 4.33) : 0;
 
   const visibleScenarios =
     group === 'all' ? SCENARIOS : SCENARIOS.filter((item) => item.group === group);
@@ -171,6 +310,240 @@ export function FinancialGuideView({ onAskScenario }: FinancialGuideViewProps) {
               </button>
             );
           })}
+        </div>
+      </section>
+
+      {/* Interactive Financial Advisory Tools */}
+      <section className="bg-[#FFFEFC]/95 border border-stone-200/90 shadow-[0_10px_30px_-14px_rgba(28,25,23,0.08)] rounded-2xl p-5 flex flex-col gap-4">
+        <div>
+          <h3 className="text-base sm:text-lg font-bold text-[#1F2937]">
+            Công cụ kiểm tra & tư vấn tài chính nhanh
+          </h3>
+          <p className="text-xs sm:text-sm text-stone-600 mt-0.5">
+            Thử nhanh các con số của bạn rồi gửi trực tiếp sang khung trò chuyện để nhận phương án cá nhân hóa.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-stretch">
+          {/* Card 1: Health Check */}
+          <div className="rounded-2xl border border-stone-200/90 bg-[#FAF8F5] p-4 flex flex-col justify-between gap-4">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-[#0F766E]">
+                <HeartPulse className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <h4 className="text-sm font-bold text-[#1F2937]">Sức khỏe thu – chi tháng</h4>
+              </div>
+              <div className="space-y-2">
+                <div>
+                  <label className="block text-[11px] font-medium text-stone-600 mb-1">
+                    Thu nhập / tháng
+                  </label>
+                  <MoneyInput size="sm" value={healthIncome} onChange={setHealthIncome} />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-stone-600 mb-1">
+                    Chi thiết yếu (trọ, ăn, đi lại...)
+                  </label>
+                  <MoneyInput size="sm" value={healthEssential} onChange={setHealthEssential} />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-stone-600 mb-1">
+                    Chi linh hoạt (giải trí, mua sắm...)
+                  </label>
+                  <MoneyInput size="sm" value={healthFlexible} onChange={setHealthFlexible} />
+                </div>
+              </div>
+              <div className="p-3 rounded-xl bg-white border border-stone-200/80 text-xs space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-stone-500">Trạng thái:</span>
+                  <span
+                    className={`font-bold ${
+                      healthSurplus < 0
+                        ? 'text-red-600'
+                        : savingsPct >= 20
+                          ? 'text-[#059669]'
+                          : 'text-[#B45309]'
+                    }`}
+                  >
+                    {healthStatus}
+                  </span>
+                </div>
+                <div className="flex justify-between tabular-nums">
+                  <span className="text-stone-500">Còn dư / tháng:</span>
+                  <span className="font-semibold text-[#1F2937]">{formatVnd(healthSurplus)}</span>
+                </div>
+                <div className="flex justify-between tabular-nums">
+                  <span className="text-stone-500">Tỷ lệ thiết yếu / dư:</span>
+                  <span className="font-medium text-stone-700">
+                    {essentialPct}% / {savingsPct}%
+                  </span>
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() =>
+                onAskScenario(
+                  `Thu nhập của tôi khoảng ${formatVnd(healthIncome)}/tháng, chi thiết yếu ${formatVnd(healthEssential)}, chi linh hoạt ${formatVnd(healthFlexible)} (còn dư ${formatVnd(healthSurplus)}). Hãy phân tích sức khỏe tài chính và gợi ý cách tối ưu ngay.`,
+                  healthSurplus < 0 ? 'debt_recovery' : 'cut_expenses'
+                )
+              }
+              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-gradient-to-r from-[#059669] to-[#0D9488] rounded-xl shadow-xs hover:shadow-md transition-all cursor-pointer"
+            >
+              <span>Tư vấn tối ưu mức chi này</span>
+              <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </div>
+
+          {/* Card 2: Loan Safety Check */}
+          <div className="rounded-2xl border border-stone-200/90 bg-[#FAF8F5] p-4 flex flex-col justify-between gap-4">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-[#B45309]">
+                <Calculator className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <h4 className="text-sm font-bold text-[#1F2937]">Kiểm tra ngưỡng an toàn vay</h4>
+              </div>
+              <div className="space-y-2">
+                <div>
+                  <label className="block text-[11px] font-medium text-stone-600 mb-1">
+                    Số tiền dự kiến vay / trả góp
+                  </label>
+                  <MoneyInput size="sm" value={loanAmount} onChange={setLoanAmount} />
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[11px] font-medium text-stone-600 mb-1">
+                      Kỳ hạn (tháng)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={120}
+                      value={loanMonths}
+                      onChange={(e) => setLoanMonths(Math.max(1, Number(e.target.value) || 1))}
+                      className="w-full px-2.5 py-1.5 text-sm font-mono tabular-nums bg-white border border-stone-200 rounded-xl text-right focus:outline-none focus:ring-2 focus:ring-[#0F766E]/20"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-medium text-stone-600 mb-1">
+                      Lãi suất (%/năm)
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={0.5}
+                      value={loanAnnualRate}
+                      onChange={(e) => setLoanAnnualRate(Math.max(0, Number(e.target.value) || 0))}
+                      className="w-full px-2.5 py-1.5 text-sm font-mono tabular-nums bg-white border border-stone-200 rounded-xl text-right focus:outline-none focus:ring-2 focus:ring-[#0F766E]/20"
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="p-3 rounded-xl bg-white border border-stone-200/80 text-xs space-y-1">
+                <div className="flex justify-between tabular-nums">
+                  <span className="text-stone-500">Trả góp mỗi tháng:</span>
+                  <span className="font-bold text-[#1F2937]">{formatVnd(monthlyInstallment)}</span>
+                </div>
+                <div className="flex justify-between tabular-nums">
+                  <span className="text-stone-500">Tổng tiền lãi ước tính:</span>
+                  <span className="font-medium text-[#B45309]">{formatVnd(totalInterest)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-stone-500">Mức độ áp lực:</span>
+                  <span
+                    className={`font-semibold ${
+                      healthSurplus <= 0 || loanToSurplusPct > 50
+                        ? 'text-red-600'
+                        : loanToSurplusPct <= 35
+                          ? 'text-[#059669]'
+                          : 'text-[#B45309]'
+                    }`}
+                  >
+                    {healthSurplus <= 0
+                      ? 'Rủi ro cao (chưa có dư)'
+                      : loanToSurplusPct <= 35
+                        ? 'Trong ngưỡng chịu được'
+                        : 'Áp lực trả nợ lớn'}
+                  </span>
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() =>
+                onAskScenario(
+                  `Tôi dự định vay/trả góp ${formatVnd(loanAmount)} trong ${safeMonths} tháng với lãi suất khoảng ${loanAnnualRate}%/năm (góp khoảng ${formatVnd(monthlyInstallment)}/tháng, tổng lãi ${formatVnd(totalInterest)}). Với thu nhập ${formatVnd(healthIncome)}/tháng và phần dư ${formatVnd(healthSurplus)}/tháng, tôi có nên vay không hay nên tích lũy trước?`,
+                  'loan_check'
+                )
+              }
+              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-gradient-to-r from-[#0F766E] to-[#059669] rounded-xl shadow-xs hover:shadow-md transition-all cursor-pointer"
+            >
+              <span>Hỏi chuyên gia về khoản vay này</span>
+              <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </div>
+
+          {/* Card 3: Savings Speed Planner */}
+          <div className="rounded-2xl border border-stone-200/90 bg-[#FAF8F5] p-4 flex flex-col justify-between gap-4">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2 text-[#059669]">
+                <PiggyBank className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <h4 className="text-sm font-bold text-[#1F2937]">Lộ trình mục tiêu tiết kiệm</h4>
+              </div>
+              <div className="space-y-2">
+                <div>
+                  <label className="block text-[11px] font-medium text-stone-600 mb-1">
+                    Số tiền mục tiêu muốn đạt
+                  </label>
+                  <MoneyInput size="sm" value={goalAmount} onChange={setGoalAmount} />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-stone-600 mb-1">
+                    Số tiền đã có sẵn hiện tại
+                  </label>
+                  <MoneyInput size="sm" value={goalAlreadySaved} onChange={setGoalAlreadySaved} />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-medium text-stone-600 mb-1">
+                    Mức có thể để dành mỗi tháng
+                  </label>
+                  <MoneyInput size="sm" value={goalMonthlySave} onChange={setGoalMonthlySave} />
+                </div>
+              </div>
+              <div className="p-3 rounded-xl bg-white border border-stone-200/80 text-xs space-y-1">
+                <div className="flex justify-between tabular-nums">
+                  <span className="text-stone-500">Thời gian dự kiến:</span>
+                  <span className="font-bold text-[#059669]">
+                    {remainingGoalAmount === 0
+                      ? 'Đã đủ mục tiêu'
+                      : monthsNeeded > 0
+                        ? `${monthsNeeded} tháng`
+                        : 'Chưa xác định'}
+                  </span>
+                </div>
+                <div className="flex justify-between tabular-nums">
+                  <span className="text-stone-500">Cần trích mỗi tuần:</span>
+                  <span className="font-semibold text-[#1F2937]">{formatVnd(weeklyNeeded)}</span>
+                </div>
+                <div className="flex justify-between tabular-nums">
+                  <span className="text-stone-500">Quỹ dự phòng 3 tháng:</span>
+                  <span className="font-medium text-stone-700">{formatVnd(healthEssential * 3)}</span>
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() =>
+                onAskScenario(
+                  `Tôi muốn đạt mục tiêu tiết kiệm ${formatVnd(goalAmount)} (hiện đã có ${formatVnd(goalAlreadySaved)}, còn thiếu ${formatVnd(remainingGoalAmount)}) với mức trích khoảng ${formatVnd(goalMonthlySave)}/tháng (dự kiến ${monthsNeeded} tháng, tương đương ${formatVnd(weeklyNeeded)}/tuần). Hãy lập cho tôi lộ trình hành động cụ thể và cách giữ kỷ luật.`,
+                  'savings_goal'
+                )
+              }
+              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-gradient-to-r from-[#059669] to-[#0D9488] rounded-xl shadow-xs hover:shadow-md transition-all cursor-pointer"
+            >
+              <span>Lập lộ trình tiết kiệm chi tiết</span>
+              <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </div>
         </div>
       </section>
 

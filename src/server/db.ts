@@ -428,6 +428,11 @@ export function deleteConversation(conversationId: string, sessionId: string): b
   return result.changes > 0;
 }
 
+export function deleteAllConversations(sessionId: string): number {
+  const result = db.prepare('DELETE FROM conversations WHERE session_id = ?').run(sessionId);
+  return result.changes;
+}
+
 export function listMessages(conversationId: string): ChatMessage[] {
   const rows = db
     .prepare('SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC')
@@ -662,6 +667,74 @@ export function deleteTransaction(txId: string, sessionId: string): boolean {
     .prepare('DELETE FROM transactions WHERE id = ? AND session_id = ?')
     .run(txId, sessionId);
   return result.changes > 0;
+}
+
+export function deleteAllTransactions(sessionId: string, type?: TransactionType): number {
+  if (type === 'income' || type === 'expense' || type === 'savings') {
+    const result = db
+      .prepare('DELETE FROM transactions WHERE session_id = ? AND type = ?')
+      .run(sessionId, type);
+    return result.changes;
+  }
+  const result = db.prepare('DELETE FROM transactions WHERE session_id = ?').run(sessionId);
+  return result.changes;
+}
+
+export function resetProfileAndSnapshots(sessionId: string): FinancialProfile {
+  const now = nowIso();
+  const recordDate = todayDateStr();
+  const defaultExpenses = createDefaultExpenses();
+
+  const runReset = db.transaction(() => {
+    db.prepare('DELETE FROM profile_snapshots WHERE session_id = ?').run(sessionId);
+    db.prepare('DELETE FROM profiles WHERE session_id = ?').run(sessionId);
+    db.prepare(
+      `INSERT INTO profiles (
+        session_id, full_name, role_type, record_date, monthly_income, expenses_json,
+        financial_goal, target_amount, target_months, current_problem, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      sessionId,
+      '',
+      'Sinh viên',
+      recordDate,
+      0,
+      JSON.stringify(defaultExpenses),
+      '',
+      0,
+      0,
+      '',
+      now
+    );
+  });
+
+  runReset();
+
+  return {
+    sessionId,
+    fullName: '',
+    roleType: 'Sinh viên',
+    recordDate,
+    monthlyIncome: 0,
+    expenses: defaultExpenses,
+    financialGoal: '',
+    targetAmount: 0,
+    targetMonths: 0,
+    currentProblem: '',
+    updatedAt: now,
+  };
+}
+
+export function resetDeviceWorkspace(sessionId: string): FinancialProfile {
+  let freshProfile!: FinancialProfile;
+  const runFullReset = db.transaction(() => {
+    db.prepare('DELETE FROM financial_plans WHERE session_id = ?').run(sessionId);
+    db.prepare('DELETE FROM conversations WHERE session_id = ?').run(sessionId);
+    db.prepare('DELETE FROM transactions WHERE session_id = ?').run(sessionId);
+    freshProfile = resetProfileAndSnapshots(sessionId);
+  });
+  runFullReset();
+  return freshProfile;
 }
 
 export function checkDbHealth(): boolean {

@@ -61,17 +61,29 @@ export function formatMonthYearVi(monthKey: string): string {
   return `Tháng ${match[2]}/${match[1]}`;
 }
 
+function generateDeviceSessionId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `fs-${crypto.randomUUID()}`;
+  }
+  return `fs-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+let inMemoryFallbackSessionId: string | null = null;
+
 export function getOrCreateSessionId(): string {
   const key = 'finsmart_session_id';
   try {
     let existing = window.localStorage.getItem(key);
-    if (!existing) {
-      existing = `fs-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    if (!existing || existing === 'default-workspace') {
+      existing = generateDeviceSessionId();
       window.localStorage.setItem(key, existing);
     }
     return existing;
   } catch {
-    return 'default-workspace';
+    if (!inMemoryFallbackSessionId) {
+      inMemoryFallbackSessionId = generateDeviceSessionId();
+    }
+    return inMemoryFallbackSessionId;
   }
 }
 

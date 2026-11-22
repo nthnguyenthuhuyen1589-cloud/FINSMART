@@ -2,12 +2,14 @@ import {
   BarChart3,
   BookOpen,
   History,
+  LayoutGrid,
   MessageSquarePlus,
   MessageSquareText,
+  Target,
   TrendingUp,
 } from 'lucide-react';
 import { MotionConfig, motion } from 'motion/react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ChatWorkspace } from './components/ChatWorkspace.tsx';
 import { DisclaimerBanner } from './components/DisclaimerBanner.tsx';
 import { FinancialGuideView } from './components/FinancialGuideView.tsx';
@@ -15,7 +17,10 @@ import { FinancialPlansView } from './components/FinancialPlansView.tsx';
 import { FinancialProfilePanel } from './components/FinancialProfilePanel.tsx';
 import { FinancialTrackerView } from './components/FinancialTrackerView.tsx';
 import { HistoryView } from './components/HistoryView.tsx';
+import { OverviewDashboardView } from './components/OverviewDashboardView.tsx';
+import { SavingsGoalsView } from './components/SavingsGoalsView.tsx';
 import type {
+  AdvisoryMode,
   ChatMessage,
   Conversation,
   FinancialPlan,
@@ -25,45 +30,66 @@ import type {
   TransactionType,
   WorkspaceData,
 } from './types.ts';
+import {
+  clearDeviceChatHistory,
+  clearDeviceProfileCache,
+  clearDeviceTransactionsCache,
+  clearEntireDeviceWorkspace,
+  hasSavedProfileData,
+  loadDeviceWorkspace,
+  saveDeviceWorkspace,
+} from './utils/deviceStorage.ts';
 import { getOrCreateSessionId, todayIsoDate } from './utils/format.ts';
 
-type ActiveTab = 'consult' | 'tracker' | 'plans' | 'guide' | 'history';
+type ActiveTab = 'overview' | 'consult' | 'tracker' | 'goals' | 'plans' | 'guide' | 'history';
 type MobilePane = 'chat' | 'profile';
 
-const EMPTY_PROFILE: FinancialProfile = {
-  sessionId: 'default-workspace',
-  fullName: '',
-  roleType: 'Sinh viên',
-  recordDate: todayIsoDate(),
-  monthlyIncome: 0,
-  expenses: [],
-  financialGoal: '',
-  targetAmount: 0,
-  targetMonths: 0,
-  currentProblem: '',
-  updatedAt: new Date().toISOString(),
-};
+function createEmptyProfile(sessionId: string): FinancialProfile {
+  return {
+    sessionId,
+    fullName: '',
+    roleType: 'Sinh viên',
+    recordDate: todayIsoDate(),
+    monthlyIncome: 0,
+    expenses: [],
+    financialGoal: '',
+    targetAmount: 0,
+    targetMonths: 0,
+    currentProblem: '',
+    updatedAt: new Date().toISOString(),
+  };
+}
 
 export default function App() {
   const [sessionId] = useState<string>(() => getOrCreateSessionId());
   const [activeTab, setActiveTab] = useState<ActiveTab>('consult');
   const [mobilePane, setMobilePane] = useState<MobilePane>('chat');
+  const [advisoryMode, setAdvisoryMode] = useState<AdvisoryMode>('general');
 
-  const [profile, setProfile] = useState<FinancialProfile>(EMPTY_PROFILE);
+  const [profile, setProfile] = useState<FinancialProfile>(() => createEmptyProfile(sessionId));
   const [snapshots, setSnapshots] = useState<ProfileSnapshot[]>([]);
   const [transactions, setTransactions] = useState<TransactionItem[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messagesByConversation, setMessagesByConversation] = useState<
+    Record<string, ChatMessage[]>
+  >({});
   const [plans, setPlans] = useState<FinancialPlan[]>([]);
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
 
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(true);
   const [isSending, setIsSending] = useState(false);
+  const [isClearingHistory, setIsClearingHistory] = useState(false);
+  const [isResettingProfile, setIsResettingProfile] = useState(false);
+  const [isResettingTransactions, setIsResettingTransactions] = useState(false);
+  const [isResettingSystem, setIsResettingSystem] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const hasLoadedRef = useRef(false);
 
   const loadWorkspace = useCallback(
     async (convId?: string | null) => {
+      const localCache = loadDeviceWorkspace(sessionId);
       try {
         setErrorMessage(null);
         const query = new URLSearchParams({ sessionId });
@@ -74,19 +100,98 @@ export default function App() {
           throw new Error('Không thể tải dữ liệu lúc này.');
         }
         const data = (await res.json()) as WorkspaceData;
-        setProfile(data.profile);
-        setSnapshots(data.snapshots ?? []);
-        setTransactions(data.transactions ?? []);
-        setConversations(data.conversations);
-        setActiveConversationId(data.activeConversationId);
-        setMessages(data.messages);
-        setPlans(data.plans);
-        if (data.plans.length > 0) {
-          setSelectedPlanId((prev) => prev ?? data.plans[0].id);
+
+        const hasServerData =
+          data.conversations.length > 0 ||
+          hasSavedProfileData(data.profile) ||
+          (data.transactions?.length ?? 0) > 0 ||
+          (data.snapshots?.length ?? 0) > 0 ||
+          data.plans.length > 0;
+
+        const hasLocalData = Boolean(
+          localCache &&
+            (localCache.conversations.length > 0 ||
+              hasSavedProfileData(localCache.profile) ||
+              localCache.transactions.length > 0 ||
+              localCache.snapshots.length > 0 ||
+              localCache.plans.length > 0)
+        );
+
+        if (!hasServerData && localCache && hasLocalData) {
+          const restoredActiveId =
+            convId && localCache.conversations.some((c) => c.id === convId)
+              ? convId
+              : localCache.activeConversationId ?? localCache.conversations[0]?.id ?? null;
+
+          setProfile(localCache.profile ?? createEmptyProfile(sessionId));
+          setSnapshots(localCache.snapshots);
+          setTransactions(localCache.transactions);
+          setConversations(localCache.conversations);
+          setActiveConversationId(restoredActiveId);
+          setMessagesByConversation(localCache.messagesByConversation);
+          setMessages(
+            restoredActiveId ? (localCache.messagesByConversation[restoredActiveId] ?? []) : []
+          );
+          setPlans(localCache.plans);
+          if (localCache.plans.length > 0) {
+            setSelectedPlanId((prev) => prev ?? localCache.plans[0].id);
+          }
+
+          if (hasSavedProfileData(localCache.profile)) {
+            void fetch('/api/profile', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ...localCache.profile, sessionId }),
+            }).catch(() => undefined);
+          }
+          if (localCache.transactions.length > 0) {
+            void fetch('/api/transactions/batch', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ sessionId, items: localCache.transactions }),
+            }).catch(() => undefined);
+          }
+        } else {
+          setProfile(data.profile);
+          setSnapshots(data.snapshots ?? []);
+          setTransactions(data.transactions ?? []);
+          setConversations(data.conversations);
+          setActiveConversationId(data.activeConversationId);
+          setMessages(data.messages);
+          setMessagesByConversation((prev) => {
+            const base = { ...(localCache?.messagesByConversation ?? {}), ...prev };
+            if (data.activeConversationId) {
+              base[data.activeConversationId] = data.messages;
+            }
+            return base;
+          });
+          setPlans(data.plans);
+          if (data.plans.length > 0) {
+            setSelectedPlanId((prev) => prev ?? data.plans[0].id);
+          }
         }
       } catch (err) {
-        setErrorMessage(err instanceof Error ? err.message : 'Lỗi kết nối dữ liệu.');
+        if (localCache) {
+          const fallbackActiveId =
+            localCache.activeConversationId ?? localCache.conversations[0]?.id ?? null;
+          setProfile(localCache.profile ?? createEmptyProfile(sessionId));
+          setSnapshots(localCache.snapshots);
+          setTransactions(localCache.transactions);
+          setConversations(localCache.conversations);
+          setActiveConversationId(fallbackActiveId);
+          setMessagesByConversation(localCache.messagesByConversation);
+          setMessages(
+            fallbackActiveId ? (localCache.messagesByConversation[fallbackActiveId] ?? []) : []
+          );
+          setPlans(localCache.plans);
+          if (localCache.plans.length > 0) {
+            setSelectedPlanId((prev) => prev ?? localCache.plans[0].id);
+          }
+        } else {
+          setErrorMessage(err instanceof Error ? err.message : 'Lỗi kết nối dữ liệu.');
+        }
       } finally {
+        hasLoadedRef.current = true;
         setIsLoadingWorkspace(false);
       }
     },
@@ -96,6 +201,30 @@ export default function App() {
   useEffect(() => {
     void loadWorkspace();
   }, [loadWorkspace]);
+
+  useEffect(() => {
+    if (!hasLoadedRef.current) return;
+    saveDeviceWorkspace({
+      sessionId,
+      profile,
+      snapshots,
+      transactions,
+      conversations,
+      activeConversationId,
+      messagesByConversation,
+      plans,
+      updatedAt: new Date().toISOString(),
+    });
+  }, [
+    sessionId,
+    profile,
+    snapshots,
+    transactions,
+    conversations,
+    activeConversationId,
+    messagesByConversation,
+    plans,
+  ]);
 
   const handleSaveProfile = async (profileToSave: FinancialProfile) => {
     setErrorMessage(null);
@@ -233,6 +362,8 @@ export default function App() {
           profile: profileToAnalyze,
           conversationId: activeConversationId,
           isReanalysis,
+          advisoryMode,
+          clientTransactions: transactions,
         }),
       });
 
@@ -255,11 +386,20 @@ export default function App() {
         setSnapshots(data.snapshots);
       }
       setActiveConversationId(data.conversation.id);
-      setMessages((prev) => {
-        const sameConv = activeConversationId === data.conversation.id;
-        return sameConv
-          ? [...prev, data.userMessage, data.assistantMessage]
+      const nextConvMessages =
+        activeConversationId === data.conversation.id
+          ? [...messages, data.userMessage, data.assistantMessage]
           : [data.userMessage, data.assistantMessage];
+      setMessages(nextConvMessages);
+      setMessagesByConversation((prev) => ({
+        ...prev,
+        [data.conversation.id]: nextConvMessages,
+      }));
+      setConversations((prev) => {
+        const exists = prev.some((c) => c.id === data.conversation.id);
+        return exists
+          ? prev.map((c) => (c.id === data.conversation.id ? data.conversation : c))
+          : [data.conversation, ...prev];
       });
 
       if (data.plan) {
@@ -275,9 +415,15 @@ export default function App() {
     }
   };
 
-  const handleSendMessage = async (text: string) => {
+  const handleSendMessage = async (text: string, overrideMode?: AdvisoryMode) => {
+    const modeToUse = overrideMode ?? advisoryMode;
     setIsSending(true);
     setErrorMessage(null);
+
+    const historySnapshot = messages
+      .filter((m) => !m.id.startsWith('temp-'))
+      .slice(-10)
+      .map((m) => ({ role: m.role, content: m.content }));
 
     const optimisticId = `temp-${Date.now()}`;
     const optimisticMsg: ChatMessage = {
@@ -298,6 +444,10 @@ export default function App() {
           sessionId,
           message: text,
           conversationId: activeConversationId,
+          advisoryMode: modeToUse,
+          clientHistory: historySnapshot,
+          clientProfile: profile,
+          clientTransactions: transactions,
         }),
       });
 
@@ -313,12 +463,23 @@ export default function App() {
         throw new Error(data.error || 'Không thể gửi tin nhắn tới chuyên gia tư vấn.');
       }
 
-      setActiveConversationId(data.conversation.id);
-      setMessages((prev) => [
-        ...prev.filter((m) => m.id !== optimisticId),
+      const persistedMessages = [
+        ...messages.filter((m) => !m.id.startsWith('temp-')),
         data.userMessage,
         data.assistantMessage,
-      ]);
+      ];
+      setActiveConversationId(data.conversation.id);
+      setMessages(persistedMessages);
+      setMessagesByConversation((prev) => ({
+        ...prev,
+        [data.conversation.id]: persistedMessages,
+      }));
+      setConversations((prev) => {
+        const exists = prev.some((c) => c.id === data.conversation.id);
+        return exists
+          ? prev.map((c) => (c.id === data.conversation.id ? data.conversation : c))
+          : [data.conversation, ...prev];
+      });
 
       if (data.plan) {
         setPlans((prev) => [data.plan!, ...prev]);
@@ -355,6 +516,10 @@ export default function App() {
       const data = (await res.json()) as { conversation: Conversation };
       setActiveConversationId(data.conversation.id);
       setMessages([]);
+      setMessagesByConversation((prev) => ({
+        ...prev,
+        [data.conversation.id]: [],
+      }));
       setConversations((prev) => [data.conversation, ...prev]);
       setActiveTab('consult');
       setMobilePane('chat');
@@ -372,28 +537,146 @@ export default function App() {
       };
       setActiveConversationId(data.conversation.id);
       setMessages(data.messages);
+      setMessagesByConversation((prev) => ({
+        ...prev,
+        [data.conversation.id]: data.messages,
+      }));
       setActiveTab('consult');
       setMobilePane('chat');
+      return;
     }
+
+    const cachedMessages = messagesByConversation[conversationId] ?? [];
+    setActiveConversationId(conversationId);
+    setMessages(cachedMessages);
+    setActiveTab('consult');
+    setMobilePane('chat');
   };
 
   const handleDeleteConversation = async (conversationId: string) => {
     const query = new URLSearchParams({ sessionId });
-    const res = await fetch(`/api/conversations/${conversationId}?${query.toString()}`, {
+    await fetch(`/api/conversations/${conversationId}?${query.toString()}`, {
       method: 'DELETE',
+    }).catch(() => undefined);
+
+    const nextList = conversations.filter((c) => c.id !== conversationId);
+    setConversations(nextList);
+    setMessagesByConversation((prev) => {
+      const next = { ...prev };
+      delete next[conversationId];
+      return next;
     });
-    if (res.ok) {
-      const nextList = conversations.filter((c) => c.id !== conversationId);
-      setConversations(nextList);
-      if (activeConversationId === conversationId) {
-        const nextActive = nextList[0]?.id ?? null;
-        setActiveConversationId(nextActive);
-        if (nextActive) {
-          await handleSelectConversation(nextActive);
-        } else {
-          setMessages([]);
+    if (activeConversationId === conversationId) {
+      const nextActive = nextList[0]?.id ?? null;
+      setActiveConversationId(nextActive);
+      if (nextActive) {
+        await handleSelectConversation(nextActive);
+      } else {
+        setMessages([]);
+      }
+    }
+  };
+
+  const handleClearAllHistory = async () => {
+    setIsClearingHistory(true);
+    setErrorMessage(null);
+    try {
+      const query = new URLSearchParams({ sessionId });
+      await fetch(`/api/chat-history?${query.toString()}`, {
+        method: 'DELETE',
+      }).catch(() => undefined);
+
+      clearDeviceChatHistory(sessionId);
+      setConversations([]);
+      setActiveConversationId(null);
+      setMessages([]);
+      setMessagesByConversation({});
+    } finally {
+      setIsClearingHistory(false);
+    }
+  };
+
+  const handleResetProfile = async () => {
+    setIsResettingProfile(true);
+    setErrorMessage(null);
+    try {
+      const query = new URLSearchParams({ sessionId });
+      const res = await fetch(`/api/profile?${query.toString()}`, {
+        method: 'DELETE',
+      }).catch(() => null);
+
+      let freshProfile = createEmptyProfile(sessionId);
+      if (res && res.ok) {
+        const data = (await res.json()) as { profile?: FinancialProfile };
+        if (data.profile) {
+          freshProfile = data.profile;
         }
       }
+
+      clearDeviceProfileCache(sessionId, freshProfile);
+      setProfile(freshProfile);
+      setSnapshots([]);
+    } finally {
+      setIsResettingProfile(false);
+    }
+  };
+
+  const handleResetTransactions = async (type?: TransactionType) => {
+    setIsResettingTransactions(true);
+    setErrorMessage(null);
+    try {
+      const query = new URLSearchParams({ sessionId });
+      if (type) query.set('type', type);
+      const res = await fetch(`/api/transactions?${query.toString()}`, {
+        method: 'DELETE',
+      }).catch(() => null);
+
+      if (res && res.ok) {
+        const data = (await res.json()) as { transactions?: TransactionItem[] };
+        if (Array.isArray(data.transactions)) {
+          setTransactions(data.transactions);
+        } else {
+          setTransactions((prev) => (type ? prev.filter((t) => t.type !== type) : []));
+        }
+      } else {
+        setTransactions((prev) => (type ? prev.filter((t) => t.type !== type) : []));
+      }
+
+      clearDeviceTransactionsCache(sessionId, type);
+    } finally {
+      setIsResettingTransactions(false);
+    }
+  };
+
+  const handleResetAllSystem = async () => {
+    setIsResettingSystem(true);
+    setErrorMessage(null);
+    try {
+      const query = new URLSearchParams({ sessionId });
+      const res = await fetch(`/api/workspace?${query.toString()}`, {
+        method: 'DELETE',
+      }).catch(() => null);
+
+      let freshProfile = createEmptyProfile(sessionId);
+      if (res && res.ok) {
+        const data = (await res.json()) as { profile?: FinancialProfile };
+        if (data.profile) {
+          freshProfile = data.profile;
+        }
+      }
+
+      clearEntireDeviceWorkspace(sessionId);
+      setProfile(freshProfile);
+      setSnapshots([]);
+      setTransactions([]);
+      setConversations([]);
+      setActiveConversationId(null);
+      setMessages([]);
+      setMessagesByConversation({});
+      setPlans([]);
+      setSelectedPlanId(null);
+    } finally {
+      setIsResettingSystem(false);
     }
   };
 
@@ -416,11 +699,14 @@ export default function App() {
     setActiveTab('plans');
   };
 
-  const handleGoToChat = (prefillPrompt?: string) => {
+  const handleGoToChat = (prefillPrompt?: string, mode?: AdvisoryMode) => {
+    if (mode) {
+      setAdvisoryMode(mode);
+    }
     setActiveTab('consult');
     setMobilePane('chat');
     if (prefillPrompt) {
-      void handleSendMessage(prefillPrompt);
+      void handleSendMessage(prefillPrompt, mode);
     }
   };
 
@@ -480,48 +766,72 @@ export default function App() {
             {/* Zone 2: Concise single-line navigation links */}
             <nav
               aria-label="Điều hướng chính"
-              className="hidden md:flex items-center gap-1 lg:gap-1.5 text-xs lg:text-sm font-medium"
+              className="hidden md:flex items-center gap-1 text-xs lg:text-sm font-medium overflow-x-auto no-scrollbar"
             >
               <button
                 type="button"
+                onClick={() => setActiveTab('overview')}
+                className={`inline-flex items-center gap-1.5 px-2.5 lg:px-3 py-2 rounded-xl transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer ${
+                  activeTab === 'overview'
+                    ? 'bg-amber-50 text-[#0F766E] font-semibold border border-amber-200/80 shadow-xs'
+                    : 'text-stone-600 hover:text-[#1F2937] hover:bg-stone-100/80 border border-transparent'
+                }`}
+              >
+                <LayoutGrid className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span>Tổng quan</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => setActiveTab('consult')}
-                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer ${
+                className={`inline-flex items-center gap-1.5 px-2.5 lg:px-3 py-2 rounded-xl transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer ${
                   activeTab === 'consult'
                     ? 'bg-amber-50 text-[#0F766E] font-semibold border border-amber-200/80 shadow-xs'
                     : 'text-stone-600 hover:text-[#1F2937] hover:bg-stone-100/80 border border-transparent'
                 }`}
               >
                 <MessageSquareText className="h-4 w-4 shrink-0" aria-hidden="true" />
-                <span>Tư vấn tài chính</span>
+                <span>Tư vấn</span>
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab('tracker')}
-                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer ${
+                className={`inline-flex items-center gap-1.5 px-2.5 lg:px-3 py-2 rounded-xl transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer ${
                   activeTab === 'tracker'
                     ? 'bg-amber-50 text-[#0F766E] font-semibold border border-amber-200/80 shadow-xs'
                     : 'text-stone-600 hover:text-[#1F2937] hover:bg-stone-100/80 border border-transparent'
                 }`}
               >
                 <TrendingUp className="h-4 w-4 shrink-0" aria-hidden="true" />
-                <span>Theo dõi thu chi</span>
+                <span>Thu chi</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('goals')}
+                className={`inline-flex items-center gap-1.5 px-2.5 lg:px-3 py-2 rounded-xl transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer ${
+                  activeTab === 'goals'
+                    ? 'bg-amber-50 text-[#0F766E] font-semibold border border-amber-200/80 shadow-xs'
+                    : 'text-stone-600 hover:text-[#1F2937] hover:bg-stone-100/80 border border-transparent'
+                }`}
+              >
+                <Target className="h-4 w-4 shrink-0" aria-hidden="true" />
+                <span>Mục tiêu & Quỹ</span>
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab('plans')}
-                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer ${
+                className={`inline-flex items-center gap-1.5 px-2.5 lg:px-3 py-2 rounded-xl transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer ${
                   activeTab === 'plans'
                     ? 'bg-amber-50 text-[#0F766E] font-semibold border border-amber-200/80 shadow-xs'
                     : 'text-stone-600 hover:text-[#1F2937] hover:bg-stone-100/80 border border-transparent'
                 }`}
               >
                 <BarChart3 className="h-4 w-4 shrink-0" aria-hidden="true" />
-                <span>Kế hoạch & Báo cáo</span>
+                <span>Kế hoạch</span>
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab('guide')}
-                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer ${
+                className={`inline-flex items-center gap-1.5 px-2.5 lg:px-3 py-2 rounded-xl transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer ${
                   activeTab === 'guide'
                     ? 'bg-amber-50 text-[#0F766E] font-semibold border border-amber-200/80 shadow-xs'
                     : 'text-stone-600 hover:text-[#1F2937] hover:bg-stone-100/80 border border-transparent'
@@ -533,14 +843,14 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setActiveTab('history')}
-                className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-xl transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer ${
+                className={`inline-flex items-center gap-1.5 px-2.5 lg:px-3 py-2 rounded-xl transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer ${
                   activeTab === 'history'
                     ? 'bg-amber-50 text-[#0F766E] font-semibold border border-amber-200/80 shadow-xs'
                     : 'text-stone-600 hover:text-[#1F2937] hover:bg-stone-100/80 border border-transparent'
                 }`}
               >
                 <History className="h-4 w-4 shrink-0" aria-hidden="true" />
-                <span>Lịch sử tư vấn</span>
+                <span>Lịch sử</span>
               </button>
             </nav>
 
@@ -561,6 +871,17 @@ export default function App() {
           <div className="md:hidden border-t border-stone-100 px-3 py-1.5 flex items-center gap-1 overflow-x-auto bg-[#FFFCF7]/95">
             <button
               type="button"
+              onClick={() => setActiveTab('overview')}
+              className={`px-3 py-2 text-xs font-medium rounded-xl whitespace-nowrap shrink-0 transition-colors ${
+                activeTab === 'overview'
+                  ? 'bg-amber-50 text-[#0F766E] font-semibold'
+                  : 'text-stone-600'
+              }`}
+            >
+              Tổng quan
+            </button>
+            <button
+              type="button"
               onClick={() => setActiveTab('consult')}
               className={`px-3 py-2 text-xs font-medium rounded-xl whitespace-nowrap shrink-0 transition-colors ${
                 activeTab === 'consult'
@@ -568,7 +889,7 @@ export default function App() {
                   : 'text-stone-600'
               }`}
             >
-              Tư vấn tài chính
+              Tư vấn
             </button>
             <button
               type="button"
@@ -579,7 +900,18 @@ export default function App() {
                   : 'text-stone-600'
               }`}
             >
-              Theo dõi ({snapshots.length})
+              Thu chi ({snapshots.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('goals')}
+              className={`px-3 py-2 text-xs font-medium rounded-xl whitespace-nowrap shrink-0 transition-colors ${
+                activeTab === 'goals'
+                  ? 'bg-amber-50 text-[#0F766E] font-semibold'
+                  : 'text-stone-600'
+              }`}
+            >
+              Mục tiêu & Quỹ
             </button>
             <button
               type="button"
@@ -680,6 +1012,19 @@ export default function App() {
             <div className="bg-[#FFFEFC]/95 border border-stone-200/90 rounded-2xl p-10 text-center text-sm text-stone-500 shadow-sm">
               Đang chuẩn bị không gian tài chính của bạn...
             </div>
+          ) : activeTab === 'overview' ? (
+            <OverviewDashboardView
+              profile={profile}
+              snapshots={snapshots}
+              transactions={transactions}
+              plans={plans}
+              conversations={conversations}
+              onNavigateTab={(tab, pane) => {
+                setActiveTab(tab);
+                if (pane) setMobilePane(pane);
+              }}
+              onAskAdvisor={(prompt) => handleGoToChat(prompt)}
+            />
           ) : activeTab === 'consult' ? (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
               <div className={mobilePane === 'profile' ? 'flex flex-col' : 'hidden lg:flex lg:flex-col'}>
@@ -688,6 +1033,8 @@ export default function App() {
                   snapshots={snapshots}
                   onChange={setProfile}
                   onSaveProfile={handleSaveProfile}
+                  onResetProfile={handleResetProfile}
+                  isResettingProfile={isResettingProfile || isResettingSystem}
                   onSelectSnapshot={handleSelectSnapshot}
                   onDeleteSnapshot={handleDeleteSnapshot}
                   onAnalyze={handleAnalyzeProfile}
@@ -702,8 +1049,12 @@ export default function App() {
                   plans={plans}
                   isSending={isSending}
                   errorMessage={errorMessage}
+                  advisoryMode={advisoryMode}
+                  onChangeAdvisoryMode={setAdvisoryMode}
                   onSendMessage={handleSendMessage}
                   onNewConversation={handleNewConversation}
+                  onClearHistory={handleClearAllHistory}
+                  isClearingHistory={isClearingHistory || isResettingSystem}
                   onOpenPlan={handleOpenPlan}
                 />
               </div>
@@ -717,6 +1068,8 @@ export default function App() {
               onCreateTransaction={handleCreateTransaction}
               onCreateTransactionsBatch={handleCreateTransactionsBatch}
               onDeleteTransaction={handleDeleteTransaction}
+              onResetTransactions={handleResetTransactions}
+              isResettingTransactions={isResettingTransactions || isResettingSystem}
               onLoadSnapshotToProfile={(snap) => {
                 handleSelectSnapshot(snap);
                 setActiveTab('consult');
@@ -729,6 +1082,16 @@ export default function App() {
               }}
               onAskAdvisor={(prompt) => handleGoToChat(prompt)}
             />
+          ) : activeTab === 'goals' ? (
+            <SavingsGoalsView
+              profile={profile}
+              transactions={transactions}
+              onCreateTransaction={handleCreateTransaction}
+              onDeleteTransaction={handleDeleteTransaction}
+              onResetSavings={() => handleResetTransactions('savings')}
+              isResetting={isResettingTransactions || isResettingSystem}
+              onAskAdvisor={(prompt, mode) => handleGoToChat(prompt, mode)}
+            />
           ) : activeTab === 'plans' ? (
             <FinancialPlansView
               plans={plans}
@@ -739,13 +1102,25 @@ export default function App() {
               onGoToChat={handleGoToChat}
             />
           ) : activeTab === 'guide' ? (
-            <FinancialGuideView onAskScenario={(prompt) => handleGoToChat(prompt)} />
+            <FinancialGuideView
+              profile={profile}
+              onAskScenario={(prompt, mode) => handleGoToChat(prompt, mode)}
+            />
           ) : (
             <HistoryView
+              sessionId={sessionId}
               conversations={conversations}
               activeConversationId={activeConversationId}
+              snapshotsCount={snapshots.length}
+              hasProfileData={hasSavedProfileData(profile)}
+              transactionsCount={transactions.length}
+              savingsCount={transactions.filter((t) => t.type === 'savings').length}
+              plansCount={plans.length}
               onSelectConversation={handleSelectConversation}
               onDeleteConversation={handleDeleteConversation}
+              onResetAllSystem={handleResetAllSystem}
+              isClearingHistory={isClearingHistory}
+              isResetting={isResettingProfile || isResettingTransactions || isResettingSystem}
               onNewConversation={handleNewConversation}
             />
           )}
