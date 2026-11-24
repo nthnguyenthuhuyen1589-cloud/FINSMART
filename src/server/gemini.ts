@@ -6,8 +6,10 @@ import type {
   FinancialProfile,
   PlanActionStep,
   PlanAllocation,
+  ProfileSnapshot,
   TransactionItem,
 } from '../types.ts';
+import { computeFinancialDiagnostics } from '../utils/financialDiagnostics.ts';
 
 function getAiClient(): GoogleGenAI {
   const rawKey = (process.env.GEMINI_API_KEY ?? '')
@@ -44,9 +46,10 @@ NHIỆM VỤ CHÍNH:
 
 NGUYÊN TẮC CỐT LÕI (BẮT BUỘC TUÂN THỦ):
 1. Sử dụng 100% tiếng Việt tự nhiên, mạch lạc, dễ hiểu, giàu tính thực tế và đồng cảm như một chuyên gia tư vấn thực thụ.
-2. KHÔNG tự bịa dữ liệu hoặc giả định hoàn cảnh người dùng. Chỉ tính toán trên đúng số liệu người dùng đã cung cấp trong hồ sơ tài chính hoặc trong tin nhắn.
-3. KHI THIẾU THÔNG TIN: Nếu người dùng hỏi một bài toán cá nhân hóa nhưng chưa cung cấp mức thu nhập, khoản chi chính hoặc hoàn cảnh cụ thể (cả trong hồ sơ lẫn tin nhắn), hãy đặt \`needsMoreInfo: true\`, \`hasPlan: false\`, giải thích ngắn gọn phần nào còn thiếu và hỏi lại 2–4 câu hỏi cụ thể để người dùng bổ sung. Tuy nhiên, nếu người dùng đã nêu rõ số liệu trong tin nhắn (ví dụ "Tôi là sinh viên, có 4 triệu/tháng...") hoặc trong hồ sơ đã có số liệu, hãy phân tích ngay lập tức một cách chi tiết, thực tế!
-4. CHÍNH XÁC SỐ HỌC: Khi lập bảng phân bổ ngân sách (\`allocations\`), tổng số tiền các hạng mục phải khớp với thu nhập hàng tháng (hoặc mức ngân sách đang phân tích), tổng tỷ lệ phần trăm xấp xỉ 100%, giải thích rõ lý do từng khoản.
+2. KHÔNG tự bịa dữ liệu hoặc giả định hoàn cảnh người dùng. Chỉ tính toán và nhận xét dựa trên đúng số liệu người dùng đã cung cấp trong hồ sơ, các mốc thời gian đã lưu hoặc sổ thu chi thực tế. Nếu phần dữ liệu nào chưa có (ví dụ tháng trước chưa ghi giao dịch hoặc chưa đặt hạn mức), hãy nói rõ là chưa có dữ liệu đó, tuyệt đối không suy đoán.
+3. THEO DÕI SÁT SAO & NHẮC NHỞ THỰC TẾ: Nếu dữ liệu thực tế cho thấy chi tiêu vượt ngân sách, nhịp chi nhanh hơn tiến độ tháng, xuất hiện nhiều khoản phát sinh ngoài hạn mức, biến động tăng mạnh so với tháng trước/mốc hồ sơ trước, hoặc tiến độ tiết kiệm chưa đạt mục tiêu, hãy chỉ thẳng con số chênh lệch và đưa ra gợi ý điều chỉnh cụ thể, khả thi ngay trong tháng.
+4. KHI THIẾU THÔNG TIN: Nếu người dùng hỏi một bài toán cá nhân hóa nhưng chưa cung cấp mức thu nhập, khoản chi chính hoặc hoàn cảnh cụ thể (cả trong hồ sơ lẫn tin nhắn), hãy đặt \`needsMoreInfo: true\`, \`hasPlan: false\`, giải thích ngắn gọn phần nào còn thiếu và hỏi lại 2–4 câu hỏi cụ thể để người dùng bổ sung. Tuy nhiên, nếu người dùng đã nêu rõ số liệu trong tin nhắn (ví dụ "Tôi là sinh viên, có 4 triệu/tháng...") hoặc trong hồ sơ đã có số liệu, hãy phân tích ngay lập tức một cách chi tiết, thực tế!
+5. CHÍNH XÁC SỐ HỌC: Khi lập bảng phân bổ ngân sách (\`allocations\`), tổng số tiền các hạng mục phải khớp với thu nhập hàng tháng (hoặc mức ngân sách đang phân tích), tổng tỷ lệ phần trăm xấp xỉ 100%, giải thích rõ lý do từng khoản.
 5. GIỚI HẠN TUÂN THỦ AN TOÀN (TUYỆT ĐỐI):
    - KHÔNG phải tư vấn đầu tư.
    - TUYỆT ĐỐI KHÔNG cam kết hay hứa hẹn mức lợi nhuận.
@@ -145,59 +148,80 @@ function formatVnd(amount: number): string {
 
 function summarizeTrackingContext(
   profile: FinancialProfile,
+  snapshots: ProfileSnapshot[] = [],
   transactions: TransactionItem[] = []
 ): string {
-  if (!transactions || transactions.length === 0) return '';
+  const diag = computeFinancialDiagnostics(profile, snapshots, transactions);
+  const lines: string[] = [];
 
-  const now = new Date();
-  const currentMonthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-  const monthTx = transactions.filter((t) => t.txDate.startsWith(currentMonthKey));
-
-  const monthExpense = monthTx
-    .filter((t) => t.type === 'expense')
-    .reduce((sum, t) => sum + t.amount, 0);
-  const monthIncome = monthTx
-    .filter((t) => t.type === 'income')
-    .reduce((sum, t) => sum + t.amount, 0);
-  const monthSavings = monthTx
-    .filter((t) => t.type === 'savings')
-    .reduce((sum, t) => sum + t.amount, 0);
-  const totalSavedAllTime = transactions
-    .filter((t) => t.type === 'savings')
-    .reduce((sum, t) => sum + t.amount, 0);
-
-  const byCategory = new Map<string, number>();
-  for (const t of monthTx) {
-    if (t.type === 'expense') {
-      byCategory.set(t.category, (byCategory.get(t.category) || 0) + t.amount);
+  if (transactions.length > 0) {
+    lines.push(
+      `DỮ LIỆU THEO DÕI THU CHI THỰC TẾ TRONG SỔ GHI CHÉP (${diag.activeMonthKey}, ngày ${diag.elapsedDays}/${diag.daysInMonth}):`
+    );
+    lines.push(
+      `- Số giao dịch tháng này: ${diag.monthTxCount} (tổng ${transactions.length} giao dịch đã lưu)`
+    );
+    lines.push(
+      `- Thực tế tháng này: Thu bổ sung ${formatVnd(diag.monthIncome)}, Đã chi ${formatVnd(diag.monthExpense)} (${diag.plannedBudget > 0 ? `${diag.spentPct}% hạn mức` : 'chưa đặt hạn mức'}), Bỏ quỹ tiết kiệm ${formatVnd(diag.monthSavings)}`
+    );
+    if (diag.unplannedExpense > 0) {
+      lines.push(
+        `- Các khoản phát sinh ngoài hạn mức khai báo: ${diag.unplannedCount} khoản, tổng ${formatVnd(diag.unplannedExpense)}`
+      );
     }
+    if (diag.plannedBudget > 0) {
+      lines.push(
+        diag.budgetOverrunAmount > 0
+          ? `- CẢNH BÁO VƯỢT NGÂN SÁCH: Đã vượt hạn mức ${formatVnd(diag.budgetOverrunAmount)}`
+          : `- Hạn mức còn lại trong tháng: ${formatVnd(diag.remainingBudget)} (chi tối đa an toàn ${formatVnd(diag.safeDailyRemaining)}/ngày cho ${diag.remainingDays} ngày còn lại)`
+      );
+    }
+    if (diag.overrunCategories.length > 0) {
+      lines.push(
+        `- Hạng mục vượt hoặc ngoài hạn mức:\n${diag.overrunCategories
+          .map(
+            (c) =>
+              `  + ${c.category}: đã chi ${formatVnd(c.actual)}${c.planned > 0 ? ` / hạn mức ${formatVnd(c.planned)} (vượt ${formatVnd(c.overAmount)})` : ' (ngoài hạn mức khai báo)'}`
+          )
+          .join('\n')}`
+      );
+    }
+    if (diag.prevMonthTxCount > 0) {
+      lines.push(
+        `- So sánh với tháng trước (${diag.prevMonthKey}): Chi tiêu tháng trước ${formatVnd(diag.prevMonthExpense)}, Tiết kiệm tháng trước ${formatVnd(diag.prevMonthSavings)}${diag.expenseChangeVsPrev !== null ? ` (chi tiêu thay đổi ${diag.expenseChangeVsPrev >= 0 ? '+' : ''}${formatVnd(diag.expenseChangeVsPrev)})` : ''}`
+      );
+    } else {
+      lines.push(`- So sánh tháng trước (${diag.prevMonthKey}): Chưa có giao dịch tháng trước để đối chiếu.`);
+    }
+    lines.push(
+      `- Tổng quỹ tiết kiệm tích lũy: ${formatVnd(diag.totalSavedAllTime)}${profile.targetAmount > 0 ? ` / mục tiêu ${formatVnd(profile.targetAmount)} (${diag.goalCompletionPct}%)` : ''}`
+    );
+    if (diag.savingsStatus === 'behind_target' && diag.requiredMonthlySavings !== null) {
+      lines.push(
+        `- CẢNH BÁO TIẾT KIỆM CHẬM TIẾN ĐỘ: Tháng này mới bỏ quỹ ${formatVnd(diag.monthSavings)} / yêu cầu ${formatVnd(diag.requiredMonthlySavings)}/tháng (thiếu ${formatVnd(diag.savingsShortfall)}).`
+      );
+    }
+  } else {
+    lines.push('DỮ LIỆU THEO DÕI THU CHI THỰC TẾ: Người dùng chưa ghi nhận giao dịch thu chi hoặc tiết kiệm nào trong sổ.');
   }
 
-  const categoryComparison = profile.expenses
-    .filter((e) => e.amount > 0 || byCategory.has(e.category))
-    .map((e) => {
-      const actual = byCategory.get(e.category) || 0;
-      return `  + ${e.category}: đã chi ${formatVnd(actual)} / hạn mức ${formatVnd(e.amount)}`;
-    });
-
-  for (const [cat, actual] of byCategory.entries()) {
-    if (!profile.expenses.some((e) => e.category === cat)) {
-      categoryComparison.push(`  + ${cat}: đã chi ${formatVnd(actual)} (ngoài hạn mức khai báo)`);
-    }
+  if (diag.snapshotDelta) {
+    lines.push(
+      `BIẾN ĐỘNG GIỮA CÁC MỐC HỒ SƠ (${diag.snapshotDelta.prevDate} -> ${diag.snapshotDelta.latestDate}): Thu nhập ${diag.snapshotDelta.incomeDiff >= 0 ? '+' : ''}${formatVnd(diag.snapshotDelta.incomeDiff)}, Chi khai báo ${diag.snapshotDelta.expenseDiff >= 0 ? '+' : ''}${formatVnd(diag.snapshotDelta.expenseDiff)}, Chênh lệch dư ${diag.snapshotDelta.balanceDiff >= 0 ? '+' : ''}${formatVnd(diag.snapshotDelta.balanceDiff)}.`
+    );
   }
 
-  return `
+  if (diag.missingDataNotes.length > 0) {
+    lines.push(`DỮ LIỆU CÒN THIẾU (KHÔNG ĐƯỢC TỰ SUY ĐOÁN): ${diag.missingDataNotes.join(' ')}`);
+  }
 
-DỮ LIỆU THEO DÕI THU CHI THỰC TẾ TRONG SỔ GHI CHÉP (${currentMonthKey}):
-- Số giao dịch đã ghi tháng này: ${monthTx.length} (tổng ${transactions.length} giao dịch đã lưu)
-- Thực tế tháng này: Thu bổ sung ${formatVnd(monthIncome)}, Đã chi ${formatVnd(monthExpense)}, Bỏ quỹ tiết kiệm ${formatVnd(monthSavings)}
-- Tổng đã bỏ quỹ tiết kiệm tích lũy: ${formatVnd(totalSavedAllTime)}${profile.targetAmount > 0 ? ` / mục tiêu ${formatVnd(profile.targetAmount)}` : ''}
-${categoryComparison.length > 0 ? `- Đối chiếu từng hạng mục tháng này:\n${categoryComparison.join('\n')}` : ''}`;
+  return `\n\n${lines.join('\n')}`;
 }
 
 export function formatProfileContext(
   profile: FinancialProfile,
-  transactions: TransactionItem[] = []
+  transactions: TransactionItem[] = [],
+  snapshots: ProfileSnapshot[] = []
 ): string {
   const totalExpenses = profile.expenses.reduce((sum, item) => sum + (item.amount || 0), 0);
   const expenseLines =
@@ -211,7 +235,7 @@ export function formatProfileContext(
       : '- Chưa nhập khoản chi tiêu cụ thể';
 
   const hasAnyNumbers = profile.monthlyIncome > 0 || totalExpenses > 0 || profile.targetAmount > 0;
-  const trackingSummary = summarizeTrackingContext(profile, transactions);
+  const trackingSummary = summarizeTrackingContext(profile, snapshots, transactions);
 
   return `HỒ SƠ TÀI CHÍNH HIỆN TẠI CỦA NGƯỜI DÙNG (CHỈ DÙNG DỮ LIỆU THỰC TẾ DƯỚI ĐÂY, KHÔNG SUY DIỄN THÊM):
 - Ngày / kỳ ghi nhận: ${profile.recordDate || 'Hôm nay'}
@@ -416,17 +440,22 @@ function normalizePlan(
 export async function generateInitialConsultation(params: {
   profile: FinancialProfile;
   transactions?: TransactionItem[];
+  snapshots?: ProfileSnapshot[];
   isReanalysis?: boolean;
   advisoryMode?: AdvisoryMode;
 }): Promise<AiConsultationResult> {
   const ai = getAiClient();
-  const profileContext = formatProfileContext(params.profile, params.transactions);
+  const profileContext = formatProfileContext(
+    params.profile,
+    params.transactions,
+    params.snapshots
+  );
   const modeGuidance =
     ADVISORY_MODE_GUIDANCE[params.advisoryMode ?? 'general'] ?? ADVISORY_MODE_GUIDANCE.general;
 
   const userPrompt = params.isReanalysis
-    ? `Người dùng vừa cập nhật hồ sơ tài chính và nhấn "Phân tích lại". Hãy đối chiếu lại thu nhập, chi tiêu, mục tiêu và vấn đề mới nhất của họ để đánh giá lại tình hình, điều chỉnh ngân sách và lập kế hoạch tài chính cập nhật.\n\nTRỌNG TÂM TƯ VẤN: ${modeGuidance}\n\n${profileContext}`
-    : `Người dùng vừa điền hồ sơ tài chính và nhấn "Phân tích và tư vấn". Hãy kiểm tra dữ liệu hồ sơ dưới đây. Nếu thiếu dữ liệu cốt lõi (ví dụ thu nhập bằng 0 và chưa mô tả hoàn cảnh), hãy hỏi bổ sung. Nếu đã có đủ dữ liệu, hãy phân tích hoàn cảnh, nhận xét tình hình hiện tại, đề xuất giải pháp thực tế và lập kế hoạch tài chính cụ thể.\n\nTRỌNG TÂM TƯ VẤN: ${modeGuidance}\n\n${profileContext}`;
+    ? `Người dùng vừa cập nhật hồ sơ tài chính và nhấn "Phân tích lại". Hãy đối chiếu lại thu nhập, chi tiêu, biến động qua các mốc/tháng, khoản phát sinh ngoài hạn mức và tiến độ tiết kiệm thực tế để đánh giá lại tình hình, cảnh báo rõ điểm vượt ngân sách hoặc chậm mục tiêu (nếu có) và lập kế hoạch tài chính cập nhật.\n\nTRỌNG TÂM TƯ VẤN: ${modeGuidance}\n\n${profileContext}`
+    : `Người dùng vừa điền hồ sơ tài chính và nhấn "Phân tích và tư vấn". Hãy kiểm tra dữ liệu hồ sơ và dữ liệu theo dõi thực tế dưới đây. Nếu thiếu dữ liệu cốt lõi (ví dụ thu nhập bằng 0 và chưa mô tả hoàn cảnh), hãy hỏi bổ sung. Nếu đã có đủ dữ liệu, hãy phân tích hoàn cảnh, nhận xét tình hình hiện tại, đề xuất giải pháp thực tế và lập kế hoạch tài chính cụ thể.\n\nTRỌNG TÂM TƯ VẤN: ${modeGuidance}\n\n${profileContext}`;
 
   const response = await generateWithFallback(ai, {
     contents: userPrompt,
@@ -449,12 +478,17 @@ export async function generateInitialConsultation(params: {
 export async function generateChatReply(params: {
   profile: FinancialProfile;
   transactions?: TransactionItem[];
+  snapshots?: ProfileSnapshot[];
   history: Array<Pick<ChatMessage, 'role' | 'content'>>;
   userMessage: string;
   advisoryMode?: AdvisoryMode;
 }): Promise<AiConsultationResult> {
   const ai = getAiClient();
-  const profileContext = formatProfileContext(params.profile, params.transactions);
+  const profileContext = formatProfileContext(
+    params.profile,
+    params.transactions,
+    params.snapshots
+  );
   const modeGuidance =
     ADVISORY_MODE_GUIDANCE[params.advisoryMode ?? 'general'] ?? ADVISORY_MODE_GUIDANCE.general;
 

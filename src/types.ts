@@ -73,7 +73,27 @@ export interface FinancialPlan {
   risksAndNotes: string[];
   adjustmentGuidance: string;
   planDate?: string; // YYYY-MM-DD
+  source?: ConsultationSource;
+  provider?: ConsultationProvider;
   createdAt: string;
+}
+
+export type ConsultationSource = 'ai' | 'rules';
+
+export type ConsultationProvider = 'Gemini' | 'RulesEngine';
+
+export interface ProviderStatusInfo {
+  source: ConsultationSource;
+  provider: ConsultationProvider;
+  aiEnabled: boolean;
+  fallbackUsed: boolean;
+  notice: string | null;
+}
+
+export interface AiProvidersAvailability {
+  geminiConfigured: boolean;
+  anyAiConfigured: boolean;
+  primaryProvider: 'Gemini' | null;
 }
 
 export interface ChatMessage {
@@ -83,6 +103,9 @@ export interface ChatMessage {
   content: string;
   needsMoreInfo?: boolean;
   planId?: string | null;
+  source?: ConsultationSource;
+  provider?: ConsultationProvider;
+  fallbackNotice?: string | null;
   createdAt: string;
 }
 

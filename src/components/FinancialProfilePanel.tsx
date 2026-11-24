@@ -1,4 +1,4 @@
-import { Plus, RefreshCw, RotateCcw, Save, Sparkles, Trash2, Wallet } from 'lucide-react';
+import { Calculator, Plus, RefreshCw, RotateCcw, Save, Sparkles, Trash2, Wallet } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useState } from 'react';
 import type { ExpenseItem, FinancialProfile, ProfileSnapshot, UserRoleType } from '../types.ts';
@@ -9,13 +9,18 @@ import { MoneyInput, formatShortVietnameseUnit } from './MoneyInput.tsx';
 interface FinancialProfilePanelProps {
   profile: FinancialProfile;
   snapshots: ProfileSnapshot[];
+  aiEnabled: boolean;
   onChange: (updated: FinancialProfile) => void;
   onSaveProfile: (profileToSave: FinancialProfile) => Promise<void>;
   onResetProfile: () => Promise<void>;
   isResettingProfile?: boolean;
   onSelectSnapshot: (snapshot: ProfileSnapshot) => void;
   onDeleteSnapshot: (snapshotId: string) => Promise<void>;
-  onAnalyze: (profileToAnalyze: FinancialProfile, isReanalysis: boolean) => Promise<void>;
+  onAnalyze: (
+    profileToAnalyze: FinancialProfile,
+    isReanalysis: boolean,
+    overrideAiEnabled?: boolean
+  ) => Promise<void>;
   isAnalyzing: boolean;
   hasExistingMessages: boolean;
 }
@@ -32,6 +37,7 @@ const INCOME_PRESETS = [
 export function FinancialProfilePanel({
   profile,
   snapshots,
+  aiEnabled,
   onChange,
   onSaveProfile,
   onResetProfile,
@@ -112,16 +118,16 @@ export function FinancialProfilePanel({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
       aria-label="Hồ sơ tài chính cá nhân"
-      className="bg-[#FFFEFC]/95 border border-stone-200/90 shadow-[0_14px_38px_-16px_rgba(28,25,23,0.1)] rounded-2xl flex flex-col lg:h-[calc(100vh-11.5rem)] lg:min-h-[620px] overflow-hidden"
+      className="bg-[#FFFEFC]/95 border border-stone-200/90 shadow-[0_14px_38px_-16px_rgba(28,25,23,0.1)] rounded-2xl flex flex-col lg:min-h-[840px] lg:h-[max(calc(100vh-5.5rem),840px)] overflow-hidden"
     >
-      <div className="flex items-start justify-between gap-3 border-b border-stone-100 px-5 py-4 shrink-0 bg-[#FFFEFC]">
+      <div className="flex items-center justify-between gap-3 border-b border-stone-100 px-5 py-3 min-h-[68px] shrink-0 bg-[#FFFEFC]">
         <div className="flex items-start gap-2.5 min-w-0">
           <div className="h-9 w-9 rounded-xl bg-amber-50 border border-amber-200/80 flex items-center justify-center text-[#B45309] shrink-0 mt-0.5">
             <Wallet className="h-4 w-4" aria-hidden="true" />
           </div>
           <div>
             <h2 className="text-base font-bold text-[#1F2937]">Hồ sơ tài chính cá nhân</h2>
-            <p className="text-xs text-stone-500 mt-1">
+            <p className="text-xs text-stone-500 mt-0.5">
               Điền số liệu thực tế để nhận gợi ý và kế hoạch sát với hoàn cảnh của bạn.
             </p>
           </div>
@@ -184,7 +190,7 @@ export function FinancialProfilePanel({
         </div>
       )}
 
-      <div className="flex-1 lg:overflow-y-auto px-5 py-4 flex flex-col gap-4">
+      <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4">
         {saveMessage && (
           <div className="text-xs font-medium text-[#047857] bg-emerald-50 border border-emerald-200 rounded-xl px-3.5 py-2.5">
             {saveMessage}
@@ -510,27 +516,49 @@ export function FinancialProfilePanel({
       </div>
       </div>
 
-      {/* Nút hành động chính */}
-      <div className="flex flex-col sm:flex-row gap-2.5 px-5 py-3.5 border-t border-stone-100 bg-white shrink-0">
-        <button
-          type="button"
-          onClick={() => onAnalyze(profile, false)}
-          disabled={isAnalyzing}
-          className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-[#059669] to-[#0D9488] shadow-md shadow-[#059669]/20 hover:shadow-lg hover:shadow-[#059669]/25 hover:-translate-y-0.5 active:scale-[0.98] rounded-xl transition-all duration-200 whitespace-nowrap disabled:opacity-60 disabled:hover:translate-y-0 cursor-pointer"
-        >
-          <Sparkles className="h-4 w-4 shrink-0" aria-hidden="true" />
-          <span>{isAnalyzing ? 'Đang phân tích...' : 'Phân tích và tư vấn'}</span>
-        </button>
+      {/* Nút hành động chính: hỗ trợ đầy đủ cả Có AI và Không AI */}
+      <div className="flex flex-col gap-2 px-5 py-3.5 border-t border-stone-100 bg-white shrink-0">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => onAnalyze(profile, false, true)}
+            disabled={isAnalyzing}
+            className={`inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 whitespace-nowrap disabled:opacity-60 cursor-pointer active:scale-[0.98] ${
+              aiEnabled
+                ? 'text-white bg-gradient-to-r from-[#059669] to-[#0D9488] shadow-md shadow-[#059669]/20 hover:shadow-lg'
+                : 'text-[#0F766E] bg-emerald-50 hover:bg-emerald-100 border border-emerald-200'
+            }`}
+          >
+            <Sparkles className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>{isAnalyzing ? 'Đang phân tích...' : 'Phân tích Có AI'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onAnalyze(profile, false, false)}
+            disabled={isAnalyzing}
+            className={`inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 text-xs sm:text-sm font-semibold rounded-xl transition-all duration-200 whitespace-nowrap disabled:opacity-60 cursor-pointer active:scale-[0.98] ${
+              !aiEnabled
+                ? 'text-white bg-gradient-to-r from-[#B45309] to-[#D97706] shadow-md shadow-amber-900/15 hover:shadow-lg'
+                : 'text-[#B45309] bg-amber-50 hover:bg-amber-100/80 border border-amber-200'
+            }`}
+          >
+            <Calculator className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>{isAnalyzing ? 'Đang tính...' : 'Phân tích Không AI'}</span>
+          </button>
+        </div>
 
         {hasExistingMessages && (
           <button
             type="button"
-            onClick={() => onAnalyze(profile, true)}
+            onClick={() => onAnalyze(profile, true, aiEnabled)}
             disabled={isAnalyzing}
-            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 text-sm font-semibold text-[#0F766E] bg-emerald-50 hover:bg-emerald-100/80 border border-emerald-200 rounded-xl transition-all duration-200 whitespace-nowrap shrink-0 disabled:opacity-60 cursor-pointer active:scale-[0.98]"
+            className="w-full inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#0F766E] bg-[#FAF8F5] hover:bg-emerald-50 border border-stone-200 hover:border-emerald-200 rounded-xl transition-all duration-200 whitespace-nowrap disabled:opacity-60 cursor-pointer active:scale-[0.98]"
           >
-            <RefreshCw className="h-4 w-4 shrink-0" aria-hidden="true" />
-            <span>Phân tích lại</span>
+            <RefreshCw className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>
+              Phân tích lại theo chế độ đang chọn ({aiEnabled ? 'Có AI' : 'Không AI'})
+            </span>
           </button>
         )}
       </div>

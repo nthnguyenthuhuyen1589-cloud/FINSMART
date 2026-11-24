@@ -1,7 +1,16 @@
-import { CalendarDays, Download, FileText, Printer, SlidersHorizontal, Trash2 } from 'lucide-react';
+import {
+  Calculator,
+  CalendarDays,
+  Download,
+  FileText,
+  Printer,
+  SlidersHorizontal,
+  Sparkles,
+  Trash2,
+} from 'lucide-react';
 import { motion } from 'motion/react';
 import { useState } from 'react';
-import type { FinancialPlan, FinancialProfile } from '../types.ts';
+import type { AdvisoryMode, FinancialPlan, FinancialProfile } from '../types.ts';
 import {
   buildReportMarkdown,
   formatDateVi,
@@ -16,21 +25,45 @@ interface FinancialPlansViewProps {
   plans: FinancialPlan[];
   profile: FinancialProfile;
   selectedPlanId: string | null;
+  aiEnabled: boolean;
+  isGeneratingPlan?: boolean;
   onSelectPlan: (planId: string) => void;
   onDeletePlan: (planId: string) => Promise<void>;
-  onGoToChat: (prefillPrompt?: string) => void;
+  onGeneratePlan: (overrideAiEnabled?: boolean) => Promise<{
+    plan: FinancialPlan | null;
+    notice: string | null;
+  }>;
+  onGoToChat: (prefillPrompt?: string, mode?: AdvisoryMode, overrideAiEnabled?: boolean) => void;
 }
 
 export function FinancialPlansView({
   plans,
   profile,
   selectedPlanId,
+  aiEnabled,
+  isGeneratingPlan = false,
   onSelectPlan,
   onDeletePlan,
+  onGeneratePlan,
   onGoToChat,
 }: FinancialPlansViewProps) {
   const [showReportPreview, setShowReportPreview] = useState(false);
   const [monthFilter, setMonthFilter] = useState<string>('all');
+  const [planFeedback, setPlanFeedback] = useState<string | null>(null);
+
+  const handleDirectCreatePlan = async (useAi: boolean) => {
+    setPlanFeedback(null);
+    const result = await onGeneratePlan(useAi);
+    if (result.notice) {
+      setPlanFeedback(result.notice);
+    } else if (result.plan) {
+      setPlanFeedback(
+        result.plan.source === 'rules'
+          ? 'Đã tạo kế hoạch mới bằng Công thức & Quy tắc (Không AI).'
+          : 'Đã tạo kế hoạch mới bằng Gemini AI.'
+      );
+    }
+  };
 
   if (plans.length === 0) {
     return (
@@ -45,15 +78,46 @@ export function FinancialPlansView({
         </div>
         <h2 className="text-lg font-bold text-[#1F2937]">Chưa có kế hoạch tài chính nào được lưu</h2>
         <p className="text-sm text-stone-600 mt-2 max-w-md mx-auto leading-relaxed">
-          Hãy điền hồ sơ tài chính và nhấn <span className="font-semibold text-[#059669]">Phân tích và tư vấn</span> hoặc trò chuyện với chuyên gia FINSMART để tạo kế hoạch ngân sách cá nhân hóa.
+          Bạn có thể tạo kế hoạch ngân sách ngay tại đây từ số liệu hồ sơ hiện tại theo chế độ{' '}
+          <span className="font-semibold text-[#059669]">Có AI (Gemini)</span> hoặc{' '}
+          <span className="font-semibold text-[#B45309]">Không AI (Công thức)</span>, hoặc mở khung trò chuyện tư vấn.
         </p>
-        <button
-          type="button"
-          onClick={() => onGoToChat()}
-          className="mt-6 inline-flex items-center justify-center px-5 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-[#059669] to-[#0D9488] hover:shadow-lg hover:shadow-[#059669]/20 hover:-translate-y-0.5 active:scale-[0.98] rounded-xl transition-all duration-200 cursor-pointer"
-        >
-          Tạo kế hoạch tài chính ngay
-        </button>
+
+        {planFeedback && (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs font-medium text-[#92400E] text-left">
+            {planFeedback}
+          </div>
+        )}
+
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-2.5">
+          <button
+            type="button"
+            disabled={isGeneratingPlan}
+            onClick={() => void handleDirectCreatePlan(true)}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-semibold text-white bg-gradient-to-r from-[#059669] to-[#0D9488] hover:shadow-lg hover:shadow-[#059669]/20 hover:-translate-y-0.5 active:scale-[0.98] rounded-xl transition-all duration-200 cursor-pointer disabled:opacity-60"
+          >
+            <Sparkles className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>{isGeneratingPlan ? 'Đang tạo...' : 'Tạo kế hoạch Có AI'}</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={isGeneratingPlan}
+            onClick={() => void handleDirectCreatePlan(false)}
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-xs sm:text-sm font-semibold text-[#B45309] bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition-all duration-200 cursor-pointer disabled:opacity-60"
+          >
+            <Calculator className="h-4 w-4 shrink-0" aria-hidden="true" />
+            <span>{isGeneratingPlan ? 'Đang tính...' : 'Tạo kế hoạch Không AI'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onGoToChat()}
+            className="inline-flex items-center justify-center px-4 py-2.5 text-xs sm:text-sm font-semibold text-[#0F766E] bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition-colors cursor-pointer"
+          >
+            Mở khung trò chuyện
+          </button>
+        </div>
       </motion.section>
     );
   }
@@ -159,55 +223,98 @@ export function FinancialPlansView({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 pt-3 border-t border-stone-100">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 pt-3 border-t border-stone-100">
+          <button
+            type="button"
+            disabled={isGeneratingPlan}
+            onClick={() => void handleDirectCreatePlan(true)}
+            className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-semibold text-white bg-gradient-to-r from-[#059669] to-[#0D9488] hover:shadow-md rounded-xl transition-all duration-200 whitespace-nowrap cursor-pointer disabled:opacity-60"
+          >
+            <Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>{isGeneratingPlan ? 'Đang tạo...' : 'Tạo mới (Có AI)'}</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={isGeneratingPlan}
+            onClick={() => void handleDirectCreatePlan(false)}
+            className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-semibold text-[#B45309] bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition-all duration-200 whitespace-nowrap cursor-pointer disabled:opacity-60"
+          >
+            <Calculator className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            <span>{isGeneratingPlan ? 'Đang tính...' : 'Tạo mới (Không AI)'}</span>
+          </button>
+
           <button
             type="button"
             onClick={() => setShowReportPreview((v) => !v)}
-            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 text-xs font-semibold text-[#B45309] bg-amber-50 hover:bg-amber-100/80 border border-amber-200 rounded-xl transition-all duration-200 whitespace-nowrap cursor-pointer active:scale-[0.98]"
+            className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-semibold text-[#0F766E] bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition-all duration-200 whitespace-nowrap cursor-pointer active:scale-[0.98]"
           >
             <FileText className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span>{showReportPreview ? 'Xem dạng bảng' : 'Tạo báo cáo hoàn chỉnh'}</span>
+            <span>{showReportPreview ? 'Xem dạng bảng' : 'Xem báo cáo đầy đủ'}</span>
           </button>
 
-          <button
-            type="button"
-            onClick={handleDownloadMarkdown}
-            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 text-xs font-medium text-stone-700 bg-stone-100 hover:bg-stone-200 border border-stone-200/70 rounded-xl transition-all duration-200 whitespace-nowrap cursor-pointer active:scale-[0.98]"
-          >
-            <Download className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span>Tải báo cáo (.md)</span>
-          </button>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={handleDownloadMarkdown}
+              className="inline-flex items-center justify-center gap-1 px-2.5 py-2.5 text-xs font-medium text-stone-700 bg-stone-100 hover:bg-stone-200 border border-stone-200/70 rounded-xl transition-all duration-200 whitespace-nowrap cursor-pointer active:scale-[0.98]"
+            >
+              <Download className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span>Tải .md</span>
+            </button>
 
-          <button
-            type="button"
-            onClick={handlePrintReport}
-            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 text-xs font-medium text-stone-700 bg-stone-100 hover:bg-stone-200 border border-stone-200/70 rounded-xl transition-all duration-200 whitespace-nowrap cursor-pointer active:scale-[0.98]"
-          >
-            <Printer className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span>In / Xuất PDF</span>
-          </button>
+            <button
+              type="button"
+              onClick={handlePrintReport}
+              className="inline-flex items-center justify-center gap-1 px-2.5 py-2.5 text-xs font-medium text-stone-700 bg-stone-100 hover:bg-stone-200 border border-stone-200/70 rounded-xl transition-all duration-200 whitespace-nowrap cursor-pointer active:scale-[0.98]"
+            >
+              <Printer className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span>In PDF</span>
+            </button>
+          </div>
 
           <button
             type="button"
             onClick={() =>
               onGoToChat(
-                `Tôi muốn điều chỉnh kế hoạch "${activePlan.title}". Nếu chi phí sinh hoạt thay đổi hoặc có khoản phát sinh, tôi nên phân bổ lại như thế nào?`
+                `Tôi muốn điều chỉnh kế hoạch "${activePlan.title}". Nếu chi phí sinh hoạt thay đổi hoặc có khoản phát sinh, tôi nên phân bổ lại như thế nào?`,
+                'general',
+                aiEnabled
               )
             }
-            className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 text-xs font-semibold text-white bg-gradient-to-r from-[#059669] to-[#0D9488] hover:shadow-md hover:shadow-[#059669]/20 active:scale-[0.98] rounded-xl transition-all duration-200 whitespace-nowrap cursor-pointer"
+            className="inline-flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-semibold text-[#1F2937] bg-[#FAF8F5] hover:bg-stone-100 border border-stone-200 rounded-xl transition-all duration-200 whitespace-nowrap cursor-pointer active:scale-[0.98]"
           >
             <SlidersHorizontal className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-            <span>Điều chỉnh cùng chuyên gia</span>
+            <span>Điều chỉnh ({aiEnabled ? 'Có AI' : 'Không AI'})</span>
           </button>
         </div>
+
+        {planFeedback && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50/80 px-3.5 py-2 text-xs font-medium text-[#92400E]">
+            {planFeedback}
+          </div>
+        )}
       </div>
 
       {showReportPreview ? (
         <article className="bg-white border border-stone-200/90 shadow-[0_12px_35px_-12px_rgba(28,25,23,0.08)] rounded-2xl p-6 sm:p-8 max-w-4xl mx-auto w-full">
           <div className="border-b border-stone-200 pb-5 mb-6">
-            <p className="text-xs font-semibold text-[#059669]">
-              FINSMART · Báo cáo kế hoạch tài chính cá nhân
-            </p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-semibold text-[#059669]">
+                FINSMART · Báo cáo kế hoạch tài chính cá nhân
+              </p>
+              <span
+                className={`inline-flex items-center gap-1 px-2.5 py-0.5 text-[11px] font-semibold rounded-lg border ${
+                  activePlan.source === 'rules'
+                    ? 'bg-amber-50 text-[#B45309] border-amber-200'
+                    : 'bg-emerald-50 text-[#0F766E] border-emerald-200'
+                }`}
+              >
+                {activePlan.source === 'rules'
+                  ? 'Công thức & Quy tắc (Không AI)'
+                  : 'Tư vấn AI · Gemini'}
+              </span>
+            </div>
             <h1 className="text-2xl font-bold text-[#1F2937] mt-1">{activePlan.title}</h1>
             <p className="text-xs text-stone-500 mt-2">
               {activePlan.planDate ? `Kỳ ghi nhận: ${formatRecordDateVi(activePlan.planDate)} · ` : ''}
@@ -316,9 +423,29 @@ export function FinancialPlansView({
           {/* Header & 4-Column KPI Strip */}
           <section className="bg-[#FFFEFC]/95 border border-stone-200/90 shadow-[0_10px_32px_-14px_rgba(28,25,23,0.08)] rounded-2xl p-5 sm:p-6">
             <div className="flex flex-col gap-1.5 pb-5 border-b border-stone-100">
-              <div className="text-xs font-medium text-stone-500">
-                {activePlan.planDate ? `Kỳ ghi nhận: ${formatRecordDateVi(activePlan.planDate)} · ` : ''}
-                Ngày lập: {formatDateVi(activePlan.createdAt)} · Nhóm: {profile.roleType}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs font-medium text-stone-500">
+                  {activePlan.planDate ? `Kỳ ghi nhận: ${formatRecordDateVi(activePlan.planDate)} · ` : ''}
+                  Ngày lập: {formatDateVi(activePlan.createdAt)} · Nhóm: {profile.roleType}
+                </div>
+                <span
+                  className={`inline-flex items-center gap-1 px-2.5 py-0.5 text-[11px] font-semibold rounded-lg border ${
+                    activePlan.source === 'rules'
+                      ? 'bg-amber-50 text-[#B45309] border-amber-200'
+                      : 'bg-emerald-50 text-[#0F766E] border-emerald-200'
+                  }`}
+                >
+                  {activePlan.source === 'rules' ? (
+                    <Calculator className="h-3 w-3" aria-hidden="true" />
+                  ) : (
+                    <Sparkles className="h-3 w-3" aria-hidden="true" />
+                  )}
+                  <span>
+                    {activePlan.source === 'rules'
+                      ? 'Công thức & Quy tắc (Không AI)'
+                      : 'AI · Gemini'}
+                  </span>
+                </span>
               </div>
               <h2 className="text-xl font-bold text-[#1F2937]">{activePlan.title}</h2>
               <p className="text-sm text-stone-600 leading-relaxed max-w-3xl">

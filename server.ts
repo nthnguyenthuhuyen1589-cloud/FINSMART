@@ -26,12 +26,18 @@ import {
   resetProfileAndSnapshots,
   saveFinancialPlan,
   updateConversationTitle,
+  updateTransaction,
   upsertProfile,
 } from './src/server/db.ts';
-import { generateChatReply, generateInitialConsultation } from './src/server/gemini.ts';
+import {
+  getAiProvidersAvailability,
+  orchestrateChatReply,
+  orchestrateConsultation,
+} from './src/server/aiOrchestrator.ts';
 import type {
   AdvisoryMode,
   FinancialProfile,
+  ProfileSnapshot,
   TransactionItem,
   TransactionType,
 } from './src/types.ts';
@@ -105,6 +111,11 @@ async function startServer() {
   app.get('/api/health', (_req, res) => {
     const dbOk = checkDbHealth();
     res.json({ status: dbOk ? 'ok' : 'degraded', db: dbOk });
+  });
+
+  // Check optional AI provider availability without exposing any secret keys
+  app.get('/api/ai-status', (_req, res) => {
+    res.json(getAiProvidersAvailability());
   });
 
   // Load entire workspace for session
@@ -272,6 +283,30 @@ async function startServer() {
     res.json({ deleted: true, count, transactions });
   });
 
+  // Update daily transaction (e.g. savings goal / fund entry)
+  app.put('/api/transactions/:id', (req, res) => {
+    const sessionId = getSessionId(req);
+    const body = req.body as {
+      txDate?: string;
+      category?: string;
+      amount?: number;
+      note?: string;
+    };
+
+    if (body?.amount !== undefined && Math.round(Number(body.amount) || 0) <= 0) {
+      res.status(400).json({ error: 'Vui lòng nhập số tiền lớn hơn 0.' });
+      return;
+    }
+
+    const updated = updateTransaction(req.params.id, sessionId, body ?? {});
+    if (!updated) {
+      res.status(404).json({ error: 'Không tìm thấy giao dịch để cập nhật.' });
+      return;
+    }
+    const transactions = listTransactions(sessionId);
+    res.json({ transaction: updated, transactions });
+  });
+
   // Delete daily transaction
   app.delete('/api/transactions/:id', (req, res) => {
     const sessionId = getSessionId(req);
@@ -325,7 +360,7 @@ async function startServer() {
     res.json({ deleted: true, count });
   });
 
-  // Analyze financial profile & generate consultation + plan ("Phân tích và tư vấn" / "Phân tích lại")
+  // Analyze financial profile & generate consultation + plan (Hybrid: Gemini AI -> RulesEngine)
   app.post('/api/consult', async (req, res) => {
     try {
       const sessionId = getSessionId(req);
@@ -334,13 +369,17 @@ async function startServer() {
         conversationId,
         isReanalysis,
         advisoryMode,
+        aiEnabled,
         clientTransactions,
+        clientSnapshots,
       } = req.body as {
         profile?: Partial<FinancialProfile>;
         conversationId?: string | null;
         isReanalysis?: boolean;
         advisoryMode?: AdvisoryMode;
+        aiEnabled?: boolean;
         clientTransactions?: TransactionItem[];
+        clientSnapshots?: ProfileSnapshot[];
       };
 
       const savedProfile = profilePayload
@@ -364,11 +403,21 @@ async function startServer() {
           : Array.isArray(clientTransactions)
             ? clientTransactions
             : [];
-      const aiResult = await generateInitialConsultation({
+      const dbSnapshots = listProfileSnapshots(sessionId);
+      const snapshots =
+        dbSnapshots.length > 0
+          ? dbSnapshots
+          : Array.isArray(clientSnapshots)
+            ? clientSnapshots
+            : [];
+
+      const outcome = await orchestrateConsultation({
+        aiEnabled: aiEnabled !== false,
         profile: savedProfile,
         transactions,
+        snapshots,
         isReanalysis: Boolean(isReanalysis),
-        advisoryMode,
+        advisoryMode: advisoryMode ?? 'general',
       });
 
       if (!conv) {
@@ -387,21 +436,26 @@ async function startServer() {
       });
 
       let savedPlan: ReturnType<typeof saveFinancialPlan> | null = null;
-      if (aiResult.hasPlan && aiResult.plan) {
+      if (outcome.hasPlan && outcome.plan) {
         savedPlan = saveFinancialPlan({
           sessionId,
           conversationId: conv.id,
           planDate: savedProfile.recordDate,
-          ...aiResult.plan,
+          source: outcome.providerStatus.source,
+          provider: outcome.providerStatus.provider,
+          ...outcome.plan,
         });
       }
 
       const assistantMsg = addMessage({
         conversationId: conv.id,
         role: 'assistant',
-        content: aiResult.replyMarkdown,
-        needsMoreInfo: aiResult.needsMoreInfo,
+        content: outcome.replyMarkdown,
+        needsMoreInfo: outcome.needsMoreInfo,
         planId: savedPlan?.id ?? null,
+        source: outcome.providerStatus.source,
+        provider: outcome.providerStatus.provider,
+        fallbackNotice: outcome.providerStatus.notice,
       });
 
       if (savedPlan && conv.title === 'Phiên tư vấn mới') {
@@ -415,31 +469,38 @@ async function startServer() {
         userMessage: userMsg,
         assistantMessage: assistantMsg,
         plan: savedPlan,
+        providerStatus: outcome.providerStatus,
       });
     } catch (error) {
       const mapped = mapAiError(error);
-      if (mapped.status === 502 || mapped.status === 429) {
-        console.warn(`[FINSMART] /api/consult handled upstream status ${mapped.status}: ${mapped.message}`);
-      } else {
-        console.error('Error in /api/consult:', error);
-      }
+      console.error('Error in /api/consult:', error);
       res.status(mapped.status).json({ error: mapped.message });
     }
   });
 
-  // Multi-turn AI chat
+  // Multi-turn hybrid consultation chat
   app.post('/api/chat', async (req, res) => {
     try {
       const sessionId = getSessionId(req);
-      const { message, conversationId, advisoryMode, clientHistory, clientProfile, clientTransactions } =
-        req.body as {
-          message?: string;
-          conversationId?: string | null;
-          advisoryMode?: AdvisoryMode;
-          clientHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
-          clientProfile?: Partial<FinancialProfile>;
-          clientTransactions?: TransactionItem[];
-        };
+      const {
+        message,
+        conversationId,
+        advisoryMode,
+        aiEnabled,
+        clientHistory,
+        clientProfile,
+        clientTransactions,
+        clientSnapshots,
+      } = req.body as {
+        message?: string;
+        conversationId?: string | null;
+        advisoryMode?: AdvisoryMode;
+        aiEnabled?: boolean;
+        clientHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
+        clientProfile?: Partial<FinancialProfile>;
+        clientTransactions?: TransactionItem[];
+        clientSnapshots?: ProfileSnapshot[];
+      };
 
       const trimmed = typeof message === 'string' ? message.trim() : '';
       if (!trimmed) {
@@ -481,12 +542,22 @@ async function startServer() {
           : Array.isArray(clientTransactions)
             ? clientTransactions
             : [];
-      const aiResult = await generateChatReply({
+      const dbSnapshots = listProfileSnapshots(sessionId);
+      const snapshots =
+        dbSnapshots.length > 0
+          ? dbSnapshots
+          : Array.isArray(clientSnapshots)
+            ? clientSnapshots
+            : [];
+
+      const outcome = await orchestrateChatReply({
+        aiEnabled: aiEnabled !== false,
         profile,
         transactions,
+        snapshots,
         history: effectiveHistory,
         userMessage: trimmed,
-        advisoryMode,
+        advisoryMode: advisoryMode ?? 'general',
       });
 
       const autoTitle = trimmed.length > 52 ? `${trimmed.slice(0, 52)}...` : trimmed;
@@ -503,21 +574,26 @@ async function startServer() {
       });
 
       let savedPlan: ReturnType<typeof saveFinancialPlan> | null = null;
-      if (aiResult.hasPlan && aiResult.plan) {
+      if (outcome.hasPlan && outcome.plan) {
         savedPlan = saveFinancialPlan({
           sessionId,
           conversationId: conv.id,
           planDate: profile.recordDate,
-          ...aiResult.plan,
+          source: outcome.providerStatus.source,
+          provider: outcome.providerStatus.provider,
+          ...outcome.plan,
         });
       }
 
       const assistantMsg = addMessage({
         conversationId: conv.id,
         role: 'assistant',
-        content: aiResult.replyMarkdown,
-        needsMoreInfo: aiResult.needsMoreInfo,
+        content: outcome.replyMarkdown,
+        needsMoreInfo: outcome.needsMoreInfo,
         planId: savedPlan?.id ?? null,
+        source: outcome.providerStatus.source,
+        provider: outcome.providerStatus.provider,
+        fallbackNotice: outcome.providerStatus.notice,
       });
 
       res.json({
@@ -525,14 +601,11 @@ async function startServer() {
         userMessage: userMsg,
         assistantMessage: assistantMsg,
         plan: savedPlan,
+        providerStatus: outcome.providerStatus,
       });
     } catch (error) {
       const mapped = mapAiError(error);
-      if (mapped.status === 502 || mapped.status === 429) {
-        console.warn(`[FINSMART] /api/chat handled upstream status ${mapped.status}: ${mapped.message}`);
-      } else {
-        console.error('Error in /api/chat:', error);
-      }
+      console.error('Error in /api/chat:', error);
       res.status(mapped.status).json({ error: mapped.message });
     }
   });
@@ -542,6 +615,79 @@ async function startServer() {
     const sessionId = getSessionId(req);
     const plans = listFinancialPlans(sessionId);
     res.json({ plans });
+  });
+
+  // Direct plan generation in-place (supports both AI and Non-AI RulesEngine)
+  app.post('/api/plans/generate', async (req, res) => {
+    try {
+      const sessionId = getSessionId(req);
+      const {
+        profile: profilePayload,
+        aiEnabled,
+        advisoryMode,
+        clientTransactions,
+        clientSnapshots,
+      } = req.body as {
+        profile?: Partial<FinancialProfile>;
+        aiEnabled?: boolean;
+        advisoryMode?: AdvisoryMode;
+        clientTransactions?: TransactionItem[];
+        clientSnapshots?: ProfileSnapshot[];
+      };
+
+      const savedProfile = profilePayload
+        ? upsertProfile({ ...profilePayload, sessionId })
+        : getOrCreateProfile(sessionId);
+
+      const dbTransactions = listTransactions(sessionId);
+      const transactions =
+        dbTransactions.length > 0
+          ? dbTransactions
+          : Array.isArray(clientTransactions)
+            ? clientTransactions
+            : [];
+      const dbSnapshots = listProfileSnapshots(sessionId);
+      const snapshots =
+        dbSnapshots.length > 0
+          ? dbSnapshots
+          : Array.isArray(clientSnapshots)
+            ? clientSnapshots
+            : [];
+
+      const outcome = await orchestrateConsultation({
+        aiEnabled: aiEnabled !== false,
+        profile: savedProfile,
+        transactions,
+        snapshots,
+        isReanalysis: false,
+        advisoryMode: advisoryMode ?? 'general',
+      });
+
+      let savedPlan: ReturnType<typeof saveFinancialPlan> | null = null;
+      if (outcome.hasPlan && outcome.plan) {
+        savedPlan = saveFinancialPlan({
+          sessionId,
+          conversationId: 'direct-plan',
+          planDate: savedProfile.recordDate,
+          source: outcome.providerStatus.source,
+          provider: outcome.providerStatus.provider,
+          ...outcome.plan,
+        });
+      }
+
+      const plans = listFinancialPlans(sessionId);
+      res.json({
+        plan: savedPlan,
+        plans,
+        needsMoreInfo: outcome.needsMoreInfo,
+        replyMarkdown: outcome.replyMarkdown,
+        providerStatus: outcome.providerStatus,
+      });
+    } catch (error) {
+      const mapped = mapAiError(error);
+      console.error('Error in /api/plans/generate:', error);
+      res.status(mapped.status).json({ error: mapped.message });
+    }
   });
 
   // Delete a financial plan

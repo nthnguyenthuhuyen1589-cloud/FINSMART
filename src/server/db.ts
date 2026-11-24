@@ -3,6 +3,8 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import type {
   ChatMessage,
+  ConsultationProvider,
+  ConsultationSource,
   Conversation,
   ExpenseItem,
   FinancialPlan,
@@ -114,6 +116,11 @@ function ensureColumn(tableName: string, columnName: string, definition: string)
 
 ensureColumn('profiles', 'record_date', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('financial_plans', 'plan_date', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('financial_plans', 'source', "TEXT NOT NULL DEFAULT 'ai'");
+ensureColumn('financial_plans', 'provider', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('messages', 'source', "TEXT NOT NULL DEFAULT 'ai'");
+ensureColumn('messages', 'provider', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('messages', 'fallback_notice', 'TEXT');
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -438,15 +445,28 @@ export function listMessages(conversationId: string): ChatMessage[] {
     .prepare('SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at ASC')
     .all(conversationId) as Array<Record<string, unknown>>;
 
-  return rows.map((r) => ({
-    id: String(r.id),
-    conversationId: String(r.conversation_id),
-    role: r.role === 'user' ? 'user' : 'assistant',
-    content: String(r.content),
-    needsMoreInfo: Boolean(r.needs_more_info),
-    planId: r.plan_id ? String(r.plan_id) : null,
-    createdAt: String(r.created_at),
-  }));
+  return rows.map((r) => {
+    const rawSource = String(r.source || '');
+    const source: ConsultationSource | undefined =
+      rawSource === 'rules' ? 'rules' : rawSource === 'ai' ? 'ai' : undefined;
+    const rawProvider = String(r.provider || '');
+    const provider: ConsultationProvider | undefined =
+      rawProvider === 'Gemini' || rawProvider === 'RulesEngine'
+        ? rawProvider
+        : undefined;
+    return {
+      id: String(r.id),
+      conversationId: String(r.conversation_id),
+      role: r.role === 'user' ? 'user' : 'assistant',
+      content: String(r.content),
+      needsMoreInfo: Boolean(r.needs_more_info),
+      planId: r.plan_id ? String(r.plan_id) : null,
+      source,
+      provider,
+      fallbackNotice: r.fallback_notice ? String(r.fallback_notice) : null,
+      createdAt: String(r.created_at),
+    };
+  });
 }
 
 export function addMessage(params: {
@@ -455,12 +475,19 @@ export function addMessage(params: {
   content: string;
   needsMoreInfo?: boolean;
   planId?: string | null;
+  source?: ConsultationSource;
+  provider?: ConsultationProvider;
+  fallbackNotice?: string | null;
 }): ChatMessage {
   const id = crypto.randomUUID();
   const createdAt = nowIso();
+  const source: ConsultationSource = params.source === 'rules' ? 'rules' : 'ai';
+  const provider = params.provider ?? '';
+  const fallbackNotice = params.fallbackNotice ?? null;
+
   db.prepare(
-    `INSERT INTO messages (id, conversation_id, role, content, needs_more_info, plan_id, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO messages (id, conversation_id, role, content, needs_more_info, plan_id, source, provider, fallback_notice, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     params.conversationId,
@@ -468,6 +495,9 @@ export function addMessage(params: {
     params.content,
     params.needsMoreInfo ? 1 : 0,
     params.planId ?? null,
+    source,
+    provider,
+    fallbackNotice,
     createdAt
   );
 
@@ -480,6 +510,9 @@ export function addMessage(params: {
     content: params.content,
     needsMoreInfo: Boolean(params.needsMoreInfo),
     planId: params.planId ?? null,
+    source,
+    provider: params.provider,
+    fallbackNotice,
     createdAt,
   };
 }
@@ -490,13 +523,15 @@ export function saveFinancialPlan(
   const id = crypto.randomUUID();
   const createdAt = nowIso();
   const planDate = sanitizeRecordDate(plan.planDate);
+  const source: ConsultationSource = plan.source === 'rules' ? 'rules' : 'ai';
+  const provider = plan.provider ?? (source === 'rules' ? 'RulesEngine' : 'Gemini');
 
   db.prepare(
     `INSERT INTO financial_plans (
       id, session_id, conversation_id, title, summary, monthly_income, total_expenses,
       recommended_monthly_savings, emergency_fund_target, allocations_json, action_steps_json,
-      risks_json, adjustment_guidance, plan_date, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      risks_json, adjustment_guidance, plan_date, source, provider, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     plan.sessionId,
@@ -512,6 +547,8 @@ export function saveFinancialPlan(
     JSON.stringify(plan.risksAndNotes || []),
     plan.adjustmentGuidance || '',
     planDate,
+    source,
+    provider,
     createdAt
   );
 
@@ -519,6 +556,8 @@ export function saveFinancialPlan(
     id,
     ...plan,
     planDate,
+    source,
+    provider,
     createdAt,
   };
 }
@@ -531,6 +570,15 @@ export function listFinancialPlans(sessionId: string): FinancialPlan[] {
   return rows.map((r) => {
     const createdAt = String(r.created_at);
     const rawPlanDate = String(r.plan_date ?? '').trim();
+    const rawSource = String(r.source ?? 'ai');
+    const source: ConsultationSource = rawSource === 'rules' ? 'rules' : 'ai';
+    const rawProvider = String(r.provider ?? '').trim();
+    const provider: ConsultationProvider | undefined =
+      rawProvider === 'Gemini' || rawProvider === 'RulesEngine'
+        ? rawProvider
+        : source === 'rules'
+          ? 'RulesEngine'
+          : undefined;
     return {
       id: String(r.id),
       sessionId: String(r.session_id),
@@ -546,6 +594,8 @@ export function listFinancialPlans(sessionId: string): FinancialPlan[] {
       risksAndNotes: JSON.parse(String(r.risks_json || '[]')),
       adjustmentGuidance: String(r.adjustment_guidance ?? ''),
       planDate: rawPlanDate || createdAt.slice(0, 10),
+      source,
+      provider,
       createdAt,
     };
   });
@@ -660,6 +710,57 @@ export function createTransactionsBatch(
 
   runBatch();
   return created;
+}
+
+export function updateTransaction(
+  txId: string,
+  sessionId: string,
+  patch: {
+    txDate?: string;
+    category?: string;
+    amount?: number;
+    note?: string;
+  }
+): TransactionItem | null {
+  const existing = db
+    .prepare('SELECT * FROM transactions WHERE id = ? AND session_id = ?')
+    .get(txId, sessionId) as Record<string, unknown> | undefined;
+  if (!existing) return null;
+
+  const txDate = patch.txDate !== undefined ? sanitizeRecordDate(patch.txDate) : String(existing.tx_date);
+  const category =
+    patch.category !== undefined
+      ? String(patch.category).trim().slice(0, 80) || 'Khoản khác'
+      : String(existing.category || 'Khoản khác');
+  const amount =
+    patch.amount !== undefined
+      ? Math.max(1, Math.round(Number(patch.amount) || 0))
+      : Number(existing.amount ?? 0);
+  const note =
+    patch.note !== undefined
+      ? String(patch.note).trim().slice(0, 200)
+      : String(existing.note ?? '');
+
+  db.prepare(
+    `UPDATE transactions
+     SET tx_date = ?, category = ?, amount = ?, note = ?
+     WHERE id = ? AND session_id = ?`
+  ).run(txDate, category, amount, note, txId, sessionId);
+
+  const rawType = String(existing.type || 'expense');
+  const type: TransactionType =
+    rawType === 'income' ? 'income' : rawType === 'savings' ? 'savings' : 'expense';
+
+  return {
+    id: String(existing.id),
+    sessionId: String(existing.session_id),
+    txDate,
+    type,
+    category,
+    amount,
+    note,
+    createdAt: String(existing.created_at),
+  };
 }
 
 export function deleteTransaction(txId: string, sessionId: string): boolean {

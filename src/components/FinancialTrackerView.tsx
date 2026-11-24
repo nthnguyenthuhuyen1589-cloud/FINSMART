@@ -20,12 +20,17 @@ import {
 import { motion } from 'motion/react';
 import { useMemo, useState } from 'react';
 import type {
+  AdvisoryMode,
   FinancialPlan,
   FinancialProfile,
   ProfileSnapshot,
   TransactionItem,
   TransactionType,
 } from '../types.ts';
+import {
+  buildFactBasedReanalysisPrompt,
+  computeFinancialDiagnostics,
+} from '../utils/financialDiagnostics.ts';
 import {
   formatMonthYearVi,
   formatRecordDateVi,
@@ -42,6 +47,7 @@ interface FinancialTrackerViewProps {
   snapshots: ProfileSnapshot[];
   transactions: TransactionItem[];
   plans: FinancialPlan[];
+  aiEnabled: boolean;
   onCreateTransaction: (input: {
     txDate: string;
     type: TransactionType;
@@ -64,7 +70,7 @@ interface FinancialTrackerViewProps {
   onLoadSnapshotToProfile: (snapshot: ProfileSnapshot) => void;
   onDeleteSnapshot: (snapshotId: string) => Promise<void>;
   onGoToConsult: () => void;
-  onAskAdvisor: (prompt: string) => void;
+  onAskAdvisor: (prompt: string, mode?: AdvisoryMode, overrideAiEnabled?: boolean) => void;
 }
 
 const QUICK_AMOUNTS = [
@@ -126,6 +132,7 @@ export function FinancialTrackerView({
   snapshots,
   transactions,
   plans,
+  aiEnabled,
   onCreateTransaction,
   onCreateTransactionsBatch,
   onDeleteTransaction,
@@ -563,22 +570,26 @@ export function FinancialTrackerView({
     return maxVal;
   }, [filteredSnapshots]);
 
+  const diagnostics = useMemo(
+    () =>
+      computeFinancialDiagnostics(
+        profile,
+        snapshots,
+        transactions,
+        activeTrackMonthKey
+      ),
+    [profile, snapshots, transactions, activeTrackMonthKey]
+  );
+
   const estimatedMonths =
     goalAmount > 0 && monthlySave > 0 ? Math.ceil(goalAmount / monthlySave) : 0;
 
-  const handleAskMonthlyReview = () => {
-    const overItems = monthlyBudgetCheck.rows
-      .filter((r) => r.isOver)
-      .map((r) => `${r.category} (${formatVnd(r.actual)} / hạn mức ${formatVnd(r.planned)})`);
-
-    const prompt = `Hãy đánh giá sát sao tình hình chi tiêu thực tế của tôi trong ${formatMonthYearVi(activeTrackMonthKey)}:
-- Hạn mức chi tiêu tháng theo hồ sơ: ${formatVnd(monthlyBudgetCheck.totalPlannedBudget)}
-- Đã chi thực tế trong sổ: ${formatVnd(monthlyBudgetCheck.totalSpent)} (${monthlyBudgetCheck.spentPct}% hạn mức, trung bình ${formatVnd(monthlyBudgetCheck.avgDailySpent)}/ngày)
-- Đã bỏ quỹ tiết kiệm tháng này: ${formatVnd(monthlyBudgetCheck.totalSavedInMonth)} (tổng tích lũy: ${formatVnd(totalSavedAllTime)})
-${overItems.length > 0 ? `- Khoản đang vượt hạn mức: ${overItems.join('; ')}` : '- Hiện chưa có khoản nào vượt hạn mức.'}
-Tôi cần điều chỉnh gì trong các ngày còn lại của tháng để giữ đúng mục tiêu?`;
-
-    onAskAdvisor(prompt);
+  const handleAskMonthlyReview = (overrideAi?: boolean) => {
+    onAskAdvisor(
+      buildFactBasedReanalysisPrompt(profile, diagnostics),
+      'cut_expenses',
+      overrideAi ?? aiEnabled
+    );
   };
 
   return (
@@ -1395,18 +1406,28 @@ Tôi cần điều chỉnh gì trong các ngày còn lại của tháng để gi
             )}
           </div>
 
-          <div className="pt-2 border-t border-stone-100 flex flex-wrap items-center justify-between gap-3">
+          <div className="pt-2 border-t border-stone-100 flex flex-wrap items-center justify-between gap-2.5">
             <span className="text-xs text-stone-600">
-              Muốn nhận gợi ý siết chi phù hợp với số liệu thực tế?
+              Nhận gợi ý siết chi phù hợp với số liệu thực tế:
             </span>
-            <button
-              type="button"
-              onClick={handleAskMonthlyReview}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#0F766E] bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition-colors cursor-pointer"
-            >
-              <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>Nhờ chuyên gia đánh giá tháng này</span>
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleAskMonthlyReview(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#0F766E] bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition-colors cursor-pointer"
+              >
+                <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>Đánh giá Có AI</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleAskMonthlyReview(false)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#B45309] bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition-colors cursor-pointer"
+              >
+                <Calculator className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>Đánh giá Không AI</span>
+              </button>
+            </div>
           </div>
         </section>
 
@@ -1495,30 +1516,178 @@ Tôi cần điều chỉnh gì trong các ngày còn lại của tháng để gi
             </div>
 
             {estimatedMonths > 0 && (
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-emerald-200/60">
+              <div className="flex flex-wrap items-center justify-between gap-2.5 pt-2 border-t border-emerald-200/60">
                 <span className="text-xs text-stone-600">
                   Mỗi tuần khoảng{' '}
                   <strong className="text-[#0F766E] font-mono tabular-nums">
                     {formatVnd(Math.round(monthlySave / 4))}
                   </strong>
                 </span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    onAskAdvisor(
-                      `Tôi muốn đạt mục tiêu ${formatVnd(goalAmount)} bằng cách tiết kiệm khoảng ${formatVnd(monthlySave)} mỗi tháng (dự kiến ${estimatedMonths} tháng). Với thu nhập và chi tiêu thực tế hiện tại, tôi nên phân bổ các khoản chi như thế nào để duy trì đều đặn?`
-                    )
-                  }
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-gradient-to-r from-[#059669] to-[#0D9488] rounded-xl shadow-sm hover:shadow-md transition-all cursor-pointer"
-                >
-                  <span>Nhờ chuyên gia lập lộ trình</span>
-                  <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onAskAdvisor(
+                        `Tôi muốn đạt mục tiêu ${formatVnd(goalAmount)} bằng cách tiết kiệm khoảng ${formatVnd(monthlySave)} mỗi tháng (dự kiến ${estimatedMonths} tháng). Với thu nhập và chi tiêu thực tế hiện tại, tôi nên phân bổ các khoản chi như thế nào để duy trì đều đặn?`,
+                        'savings_goal',
+                        true
+                      )
+                    }
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-gradient-to-r from-[#059669] to-[#0D9488] rounded-xl shadow-sm hover:shadow-md transition-all cursor-pointer"
+                  >
+                    <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span>Lộ trình Có AI</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onAskAdvisor(
+                        `Tôi muốn đạt mục tiêu ${formatVnd(goalAmount)} bằng cách tiết kiệm khoảng ${formatVnd(monthlySave)} mỗi tháng (dự kiến ${estimatedMonths} tháng). Với thu nhập và chi tiêu thực tế hiện tại, tôi nên phân bổ các khoản chi như thế nào để duy trì đều đặn?`,
+                        'savings_goal',
+                        false
+                      )
+                    }
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#B45309] bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition-colors cursor-pointer"
+                  >
+                    <Calculator className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span>Lộ trình Không AI</span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
         </section>
       </div>
+
+      {/* Theo dõi biến động thực tế & Nhắc nhở điều chỉnh (Không suy đoán) */}
+      <section className="bg-[#FFFEFC]/95 border border-stone-200/90 shadow-[0_10px_30px_-14px_rgba(28,25,23,0.08)] rounded-2xl p-5 flex flex-col gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-stone-100">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle className="h-4 w-4 text-[#D97706]" aria-hidden="true" />
+            <div>
+              <h3 className="text-base font-bold text-[#1F2937]">
+                Nhận xét biến động & Nhắc nhở thực tế ({formatMonthYearVi(diagnostics.activeMonthKey)})
+              </h3>
+              <p className="text-xs text-stone-500 mt-0.5">
+                Tổng hợp trực tiếp từ số liệu đã ghi nhận trên thiết bị, hoàn toàn không tự suy đoán.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => handleAskMonthlyReview(true)}
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-gradient-to-r from-[#059669] to-[#0D9488] rounded-xl shadow-xs hover:shadow-md transition-all cursor-pointer whitespace-nowrap"
+            >
+              <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>Phân tích Có AI</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => handleAskMonthlyReview(false)}
+              className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#B45309] bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
+            >
+              <Calculator className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>Phân tích Không AI</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 3 balanced real-data variance indicators */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs items-stretch">
+          <div className="p-3.5 rounded-xl bg-[#FAF8F5] border border-stone-200/80 flex flex-col justify-between gap-1">
+            <span className="text-stone-500 font-medium">Khoản phát sinh ngoài hạn mức</span>
+            <span
+              className={`text-base font-mono tabular-nums font-bold ${
+                diagnostics.unplannedExpense > 0 ? 'text-[#B45309]' : 'text-[#059669]'
+              }`}
+            >
+              {formatVnd(diagnostics.unplannedExpense)}
+            </span>
+            <span className="text-[11px] text-stone-500">
+              {diagnostics.unplannedCount > 0
+                ? `${diagnostics.unplannedCount} khoản chưa khai báo trong hồ sơ`
+                : 'Chưa phát sinh khoản ngoài dự kiến'}
+            </span>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-[#FAF8F5] border border-stone-200/80 flex flex-col justify-between gap-1">
+            <span className="text-stone-500 font-medium">
+              So với tháng trước ({formatMonthYearVi(diagnostics.prevMonthKey)})
+            </span>
+            <span
+              className={`text-base font-mono tabular-nums font-bold ${
+                diagnostics.expenseChangeVsPrev === null
+                  ? 'text-stone-600'
+                  : diagnostics.expenseChangeVsPrev > 0
+                    ? 'text-red-600'
+                    : 'text-[#059669]'
+              }`}
+            >
+              {diagnostics.expenseChangeVsPrev === null
+                ? 'Chưa đủ dữ liệu đối chiếu'
+                : `${diagnostics.expenseChangeVsPrev >= 0 ? '+' : ''}${formatVnd(diagnostics.expenseChangeVsPrev)}`}
+            </span>
+            <span className="text-[11px] text-stone-500">
+              {diagnostics.prevMonthTxCount > 0
+                ? `Tháng trước chi ${formatVnd(diagnostics.prevMonthExpense)} · Bỏ quỹ ${formatVnd(diagnostics.prevMonthSavings)}`
+                : 'Tháng trước chưa có giao dịch được ghi'}
+            </span>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-[#FAF8F5] border border-stone-200/80 flex flex-col justify-between gap-1">
+            <span className="text-stone-500 font-medium">Biến động hồ sơ qua các mốc</span>
+            <span
+              className={`text-base font-mono tabular-nums font-bold ${
+                !diagnostics.snapshotDelta
+                  ? 'text-stone-600'
+                  : diagnostics.snapshotDelta.balanceDiff >= 0
+                    ? 'text-[#059669]'
+                    : 'text-[#B45309]'
+              }`}
+            >
+              {!diagnostics.snapshotDelta
+                ? `${snapshots.length} mốc đã lưu`
+                : `${diagnostics.snapshotDelta.balanceDiff >= 0 ? '+' : ''}${formatVnd(diagnostics.snapshotDelta.balanceDiff)} số dư`}
+            </span>
+            <span className="text-[11px] text-stone-500">
+              {diagnostics.snapshotDelta
+                ? `Từ ${formatRecordDateVi(diagnostics.snapshotDelta.prevDate)} đến ${formatRecordDateVi(diagnostics.snapshotDelta.latestDate)}`
+                : 'Lưu từ 2 mốc hồ sơ trở lên để thấy biến động'}
+            </span>
+          </div>
+        </div>
+
+        {/* Fact-based reminders list */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 items-stretch">
+          {diagnostics.reminders.map((rem) => {
+            const boxStyle =
+              rem.severity === 'danger'
+                ? 'bg-red-50/75 border-red-200 text-red-900'
+                : rem.severity === 'warning'
+                  ? 'bg-amber-50/80 border-amber-200 text-[#92400E]'
+                  : rem.severity === 'positive'
+                    ? 'bg-emerald-50/75 border-emerald-200 text-[#047857]'
+                    : 'bg-[#FAF8F5] border-stone-200 text-stone-700';
+
+            return (
+              <div
+                key={rem.id}
+                className={`p-3.5 rounded-xl border flex flex-col justify-between gap-2 text-xs ${boxStyle}`}
+              >
+                <div className="space-y-1">
+                  <div className="font-bold leading-snug">{rem.title}</div>
+                  <p className="opacity-90 leading-relaxed">{rem.detail}</p>
+                </div>
+                <p className="pt-2 border-t border-current/15 font-medium leading-relaxed">
+                  Gợi ý: {rem.suggestion}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      </section>
 
       {/* Lịch sử các mốc hồ sơ đã lưu */}
       <section className="bg-[#FFFEFC]/95 border border-stone-200/90 shadow-[0_10px_30px_-14px_rgba(28,25,23,0.08)] rounded-2xl p-5 flex flex-col gap-4">

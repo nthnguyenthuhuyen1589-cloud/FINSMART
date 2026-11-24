@@ -2,13 +2,16 @@ import {
   ArrowRight,
   Calculator,
   Compass,
+  Cpu,
   FileSpreadsheet,
+  Info,
   MessageSquarePlus,
   PiggyBank,
   Scissors,
   Send,
   ShieldAlert,
   ShieldCheck,
+  Sparkles,
   Trash2,
   User,
 } from 'lucide-react';
@@ -17,7 +20,13 @@ import { useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import advisorAvatar from '../assets/images/advisor_avatar_1794990322481.jpg';
-import type { AdvisoryMode, ChatMessage, FinancialPlan } from '../types.ts';
+import type {
+  AdvisoryMode,
+  AiProvidersAvailability,
+  ChatMessage,
+  FinancialPlan,
+  ProviderStatusInfo,
+} from '../types.ts';
 import { formatDateVi } from '../utils/format.ts';
 import { DisclaimerBanner } from './DisclaimerBanner.tsx';
 
@@ -28,6 +37,10 @@ interface ChatWorkspaceProps {
   errorMessage: string | null;
   advisoryMode: AdvisoryMode;
   onChangeAdvisoryMode: (mode: AdvisoryMode) => void;
+  aiEnabled: boolean;
+  onToggleAi: () => void;
+  aiAvailability: AiProvidersAvailability | null;
+  lastProviderStatus: ProviderStatusInfo | null;
   onSendMessage: (text: string, overrideMode?: AdvisoryMode) => Promise<void>;
   onNewConversation: () => Promise<void>;
   onClearHistory: () => Promise<void>;
@@ -97,6 +110,10 @@ export function ChatWorkspace({
   errorMessage,
   advisoryMode,
   onChangeAdvisoryMode,
+  aiEnabled,
+  onToggleAi,
+  aiAvailability,
+  lastProviderStatus,
   onSendMessage,
   onNewConversation,
   onClearHistory,
@@ -145,10 +162,10 @@ export function ChatWorkspace({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
       aria-label="Khung trò chuyện với chuyên gia tư vấn tài chính"
-      className="bg-[#FFFEFC] border border-stone-200/90 shadow-[0_14px_38px_-16px_rgba(28,25,23,0.1)] rounded-2xl flex flex-col h-[calc(100vh-13rem)] min-h-[540px] lg:h-[calc(100vh-11.5rem)] lg:min-h-[620px] overflow-hidden"
+      className="bg-[#FFFEFC] border border-stone-200/90 shadow-[0_14px_38px_-16px_rgba(28,25,23,0.1)] rounded-2xl flex flex-col min-h-[680px] h-[max(calc(100vh-6rem),700px)] lg:min-h-[840px] lg:h-[max(calc(100vh-5.5rem),840px)] overflow-hidden"
     >
       {/* Advisor Header - Warm Deep Forest Teal */}
-      <div className="relative flex items-center justify-between gap-4 px-5 py-4 bg-gradient-to-r from-[#134E4A] via-[#115E59] to-[#0F766E] text-white overflow-hidden shrink-0">
+      <div className="relative flex items-center justify-between gap-4 px-5 py-3 min-h-[68px] bg-gradient-to-r from-[#134E4A] via-[#115E59] to-[#0F766E] text-white overflow-hidden shrink-0">
         <div
           aria-hidden="true"
           className="pointer-events-none absolute -right-10 -top-10 h-36 w-36 rounded-full bg-amber-300/15 blur-2xl"
@@ -179,7 +196,32 @@ export function ChatWorkspace({
           </div>
         </div>
 
-        <div className="relative flex items-center gap-2 shrink-0">
+        <div className="relative flex flex-wrap items-center justify-end gap-2 shrink-0">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={aiEnabled}
+            onClick={onToggleAi}
+            disabled={isSending}
+            title={
+              aiEnabled
+                ? 'AI đang bật (Ưu tiên Gemini AI, tự động chuyển sang Công thức & Quy tắc nếu lỗi hoặc hết hạn mức). Nhấn để tắt AI.'
+                : 'AI đang tắt — hệ thống chạy hoàn toàn bằng Công thức & Quy tắc nội bộ. Nhấn để bật AI.'
+            }
+            className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold border rounded-xl transition-all duration-200 whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50 active:scale-[0.98] ${
+              aiEnabled
+                ? 'bg-emerald-400/20 hover:bg-emerald-400/30 text-white border-emerald-200/50'
+                : 'bg-amber-400/20 hover:bg-amber-400/30 text-amber-100 border-amber-200/45'
+            }`}
+          >
+            {aiEnabled ? (
+              <Sparkles className="h-3.5 w-3.5 text-emerald-200" aria-hidden="true" />
+            ) : (
+              <Calculator className="h-3.5 w-3.5 text-amber-200" aria-hidden="true" />
+            )}
+            <span>{aiEnabled ? 'AI: Bật' : 'AI: Tắt'}</span>
+          </button>
+
           <button
             type="button"
             onClick={() => setShowClearConfirm(true)}
@@ -235,10 +277,68 @@ export function ChatWorkspace({
         </div>
       )}
 
-      {/* Mandatory Disclaimer + Advisory Modes */}
-      <div className="px-5 pt-3 pb-2.5 bg-[#FCF9F4] border-b border-stone-200/70 flex flex-col gap-2.5">
+      {/* Mandatory Disclaimer + Hybrid Provider Status + Advisory Modes */}
+      <div className="px-4 sm:px-5 pt-2.5 pb-2 bg-[#FCF9F4] border-b border-stone-200/70 flex flex-col gap-1.5 shrink-0">
         <DisclaimerBanner compact />
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+
+        {/* Active Provider & Mode Status Strip */}
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-1 rounded-xl bg-white border border-stone-200/80 text-[11px]">
+          <div className="flex items-center gap-2 min-w-0">
+            <span
+              className={`h-2 w-2 rounded-full shrink-0 ${
+                !aiEnabled
+                  ? 'bg-amber-500'
+                  : lastProviderStatus?.source === 'ai'
+                    ? 'bg-emerald-500'
+                    : aiAvailability?.anyAiConfigured
+                      ? 'bg-emerald-500'
+                      : 'bg-amber-500'
+              }`}
+              aria-hidden="true"
+            />
+            <span className="font-semibold text-[#1F2937] flex items-center gap-1">
+              <Cpu className="h-3 w-3 text-[#0F766E] shrink-0" aria-hidden="true" />
+              <span>Chế độ hoạt động:</span>
+            </span>
+            <span className="text-stone-700 font-medium truncate">
+              {!aiEnabled
+                ? 'Công thức & Quy tắc (AI đang tắt)'
+                : lastProviderStatus
+                  ? lastProviderStatus.source === 'ai'
+                    ? `AI · ${lastProviderStatus.provider}`
+                    : 'Công thức & Quy tắc (Dự phòng tự động)'
+                  : aiAvailability?.anyAiConfigured
+                    ? `AI Sẵn sàng (${aiAvailability.primaryProvider})`
+                    : 'Công thức & Quy tắc (Chưa cấu hình API Key Gemini)'}
+            </span>
+          </div>
+
+          <span className="text-[11px] text-stone-500 whitespace-nowrap">
+            {aiEnabled
+              ? 'Chế độ: Gemini AI → Công thức dự phòng'
+              : 'Không gọi API ngoài · Xử lý 100% theo quy tắc'}
+          </span>
+        </div>
+
+        {(lastProviderStatus?.notice ||
+          (!aiEnabled && !lastProviderStatus?.notice) ||
+          (aiEnabled && aiAvailability && !aiAvailability.anyAiConfigured && !lastProviderStatus?.notice)) && (
+          <div
+            role="status"
+            className="flex items-start gap-2 px-3 py-1.5 rounded-xl bg-amber-50/90 border border-amber-200/80 text-[11px] text-amber-900 leading-snug"
+          >
+            <Info className="h-3.5 w-3.5 text-amber-700 shrink-0 mt-0.5" aria-hidden="true" />
+            <span>
+              {lastProviderStatus?.notice
+                ? lastProviderStatus.notice
+                : !aiEnabled
+                  ? 'Bạn đã tắt AI. FINSMART đang tư vấn trực tiếp bằng hệ thống Công thức & Quy tắc tài chính dựa trên dữ liệu bạn nhập.'
+                  : 'Máy chủ hiện chưa có API Key Gemini — hệ thống tự động dùng Công thức & Quy tắc tài chính mà không bị gián đoạn.'}
+            </span>
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-1.5">
           <span className="text-[11px] font-semibold text-stone-500 whitespace-nowrap shrink-0 mr-1">
             Chủ đề tư vấn:
           </span>
@@ -361,15 +461,44 @@ export function ChatWorkspace({
                   }`}
                 >
                   <div
-                    className={`flex items-center justify-between gap-4 mb-1.5 text-[11px] ${
+                    className={`flex flex-wrap items-center justify-between gap-2 mb-1.5 text-[11px] ${
                       isUser ? 'text-emerald-100' : 'text-stone-500'
                     }`}
                   >
-                    <span className="font-semibold">
-                      {isUser ? 'Bạn' : 'Chuyên gia FINSMART'}
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-semibold">
+                        {isUser ? 'Bạn' : 'Chuyên gia FINSMART'}
+                      </span>
+                      {!isUser && (msg.source || msg.provider) && (
+                        <span
+                          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md border text-[10px] font-semibold ${
+                            msg.source === 'rules' || msg.provider === 'RulesEngine'
+                              ? 'bg-amber-50 text-amber-800 border-amber-200'
+                              : 'bg-emerald-50 text-[#0F766E] border-emerald-200'
+                          }`}
+                        >
+                          {msg.source === 'rules' || msg.provider === 'RulesEngine' ? (
+                            <>
+                              <Calculator className="h-2.5 w-2.5 shrink-0" aria-hidden="true" />
+                              <span>Công thức & Quy tắc (Không AI)</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles className="h-2.5 w-2.5 shrink-0" aria-hidden="true" />
+                              <span>AI · {msg.provider || 'Trợ lý'}</span>
+                            </>
+                          )}
+                        </span>
+                      )}
+                    </div>
                     <span className="tabular-nums">{formatDateVi(msg.createdAt)}</span>
                   </div>
+
+                  {!isUser && msg.fallbackNotice && (
+                    <div className="mb-2 px-2.5 py-1.5 rounded-lg bg-amber-50/80 border border-amber-200/70 text-[11px] text-amber-900">
+                      {msg.fallbackNotice}
+                    </div>
+                  )}
 
                   {isUser ? (
                     <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
@@ -451,8 +580,8 @@ export function ChatWorkspace({
       </div>
 
       {/* Quick Advisory Trigger Strip + Chat Composer */}
-      <div className="border-t border-stone-200/80 bg-white">
-        <div className="px-3.5 pt-2.5 pb-1 flex items-center gap-1.5 overflow-x-auto">
+      <div className="border-t border-stone-200/80 bg-white shrink-0">
+        <div className="px-3.5 pt-2 pb-1 flex items-center gap-1.5 overflow-x-auto">
           <span className="text-[11px] text-stone-500 whitespace-nowrap shrink-0">Hỏi nhanh:</span>
           {ADVISORY_MODES.filter((m) => m.id !== 'general').map((mode) => (
             <button
@@ -471,7 +600,7 @@ export function ChatWorkspace({
         </div>
         <form
           onSubmit={handleSubmit}
-          className="p-3.5 pt-2 flex items-end gap-2.5"
+          className="px-3.5 pt-1.5 pb-3 flex items-end gap-2.5"
         >
         <label htmlFor="chat-input" className="sr-only">
           Nhập câu hỏi tài chính cá nhân của bạn

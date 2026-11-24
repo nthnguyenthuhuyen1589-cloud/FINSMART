@@ -1,18 +1,22 @@
 import {
   ArrowRight,
   BarChart3,
+  Calculator,
   CalendarDays,
   ClipboardList,
   HardDrive,
   MessageSquareText,
-  PiggyBank,
+  Sparkles,
   Target,
   TrendingUp,
   Wallet,
 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type {
+  AdvisoryMode,
   Conversation,
   FinancialPlan,
   FinancialProfile,
@@ -20,12 +24,17 @@ import type {
   TransactionItem,
 } from '../types.ts';
 import {
+  buildFactBasedReanalysisPrompt,
+  computeFinancialDiagnostics,
+} from '../utils/financialDiagnostics.ts';
+import {
   formatMonthYearVi,
   formatRecordDateVi,
   formatVnd,
   getMonthYearKey,
   todayIsoDate,
 } from '../utils/format.ts';
+import { runRulesConsultation } from '../utils/RulesEngine.ts';
 
 interface OverviewDashboardViewProps {
   profile: FinancialProfile;
@@ -33,11 +42,12 @@ interface OverviewDashboardViewProps {
   transactions: TransactionItem[];
   plans: FinancialPlan[];
   conversations: Conversation[];
+  aiEnabled: boolean;
   onNavigateTab: (
     tab: 'consult' | 'tracker' | 'goals' | 'plans' | 'guide' | 'history',
     mobilePane?: 'chat' | 'profile'
   ) => void;
-  onAskAdvisor: (prompt: string) => void;
+  onAskAdvisor: (prompt: string, mode?: AdvisoryMode, overrideAiEnabled?: boolean) => void;
 }
 
 export function OverviewDashboardView({
@@ -46,9 +56,11 @@ export function OverviewDashboardView({
   transactions,
   plans,
   conversations,
+  aiEnabled,
   onNavigateTab,
   onAskAdvisor,
 }: OverviewDashboardViewProps) {
+  const [showInstantRulesReport, setShowInstantRulesReport] = useState(false);
   const currentMonthKey = useMemo(() => getMonthYearKey(todayIsoDate()), []);
 
   const summary = useMemo(() => {
@@ -107,6 +119,24 @@ export function OverviewDashboardView({
     profile.targetAmount > 0
       ? Math.min(100, Math.round((summary.totalSavedAllTime / profile.targetAmount) * 100))
       : 0;
+
+  const diagnostics = useMemo(
+    () => computeFinancialDiagnostics(profile, snapshots, transactions, currentMonthKey),
+    [profile, snapshots, transactions, currentMonthKey]
+  );
+
+  const instantRulesReport = useMemo(
+    () =>
+      showInstantRulesReport
+        ? runRulesConsultation({
+            profile,
+            transactions,
+            snapshots,
+            advisoryMode: 'general',
+          })
+        : null,
+    [showInstantRulesReport, profile, transactions, snapshots]
+  );
 
   return (
     <motion.div
@@ -208,6 +238,86 @@ export function OverviewDashboardView({
         </div>
       </div>
 
+      {/* Real-data Tracking & Reminder Strip */}
+      {diagnostics.reminders.length > 0 && (
+        <section className="bg-[#FFFEFC]/95 border border-stone-200/90 shadow-[0_8px_24px_-12px_rgba(28,25,23,0.06)] rounded-2xl p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="min-w-0 flex-1 space-y-1">
+            <div className="text-xs font-bold text-[#0F766E]">
+              Theo dõi thực tế {formatMonthYearVi(currentMonthKey)} · Dựa trên dữ liệu đã lưu
+            </div>
+            <p className="text-xs sm:text-sm font-semibold text-[#1F2937]">
+              {diagnostics.reminders[0].title}
+            </p>
+            <p className="text-xs text-stone-600 leading-relaxed">
+              {diagnostics.reminders[0].detail} {diagnostics.reminders[0].suggestion}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => onNavigateTab('tracker')}
+              className="px-3.5 py-2 text-xs font-semibold text-[#0F766E] bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
+            >
+              Xem đối chiếu chi tiết
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                onAskAdvisor(buildFactBasedReanalysisPrompt(profile, diagnostics), 'general', true)
+              }
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer whitespace-nowrap ${
+                aiEnabled
+                  ? 'text-white bg-gradient-to-r from-[#059669] to-[#0D9488] shadow-xs hover:shadow-md'
+                  : 'text-[#0F766E] bg-emerald-50 hover:bg-emerald-100 border border-emerald-200'
+              }`}
+            >
+              <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>Phân tích Có AI</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowInstantRulesReport((v) => !v)}
+              className={`inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer whitespace-nowrap ${
+                !aiEnabled || showInstantRulesReport
+                  ? 'text-white bg-gradient-to-r from-[#B45309] to-[#D97706] shadow-xs hover:shadow-md'
+                  : 'text-[#B45309] bg-amber-50 hover:bg-amber-100 border border-amber-200'
+              }`}
+            >
+              <Calculator className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>{showInstantRulesReport ? 'Ẩn báo cáo Không AI' : 'Xem nhanh Không AI'}</span>
+            </button>
+          </div>
+        </section>
+      )}
+
+      {showInstantRulesReport && instantRulesReport && (
+        <section className="bg-[#FFFEFC]/95 border border-amber-200/90 shadow-[0_10px_30px_-14px_rgba(28,25,23,0.08)] rounded-2xl p-5 flex flex-col gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-amber-100">
+            <div className="flex items-center gap-2">
+              <Calculator className="h-4 w-4 text-[#B45309]" aria-hidden="true" />
+              <h3 className="text-sm sm:text-base font-bold text-[#1F2937]">
+                Kết quả phân tích nhanh (Không AI · Công thức & Quy tắc)
+              </h3>
+            </div>
+            <button
+              type="button"
+              onClick={() =>
+                onAskAdvisor(buildFactBasedReanalysisPrompt(profile, diagnostics), 'general', false)
+              }
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-[#B45309] bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition-colors cursor-pointer"
+            >
+              <span>Mở trong khung tư vấn Không AI</span>
+              <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+            </button>
+          </div>
+          <div className="text-sm leading-relaxed text-stone-800 space-y-2.5 [&_h1]:text-base [&_h1]:font-bold [&_h1]:text-[#1F2937] [&_h2]:text-sm [&_h2]:font-bold [&_h2]:text-[#0F766E] [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:text-[#1F2937] [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:space-y-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:space-y-1 [&_strong]:font-semibold [&_strong]:text-[#1F2937] [&_table]:w-full [&_table]:border-collapse [&_table]:text-xs [&_th]:text-left [&_th]:py-2 [&_th]:px-2.5 [&_th]:border-b [&_th]:border-stone-200 [&_th]:bg-stone-50 [&_th]:font-semibold [&_td]:py-2 [&_td]:px-2.5 [&_td]:border-b [&_td]:border-stone-100 [&_td]:tabular-nums">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {instantRulesReport.replyMarkdown}
+            </ReactMarkdown>
+          </div>
+        </section>
+      )}
+
       {/* Symmetrical 2-Column Analytical Split */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
         {/* Left: Cơ cấu phân bổ thu chi theo hồ sơ */}
@@ -298,22 +408,40 @@ export function OverviewDashboardView({
             )}
           </div>
 
-          <div className="pt-3 border-t border-stone-100 flex items-center justify-between gap-3">
+          <div className="pt-3 border-t border-stone-100 flex flex-wrap items-center justify-between gap-2.5">
             <span className="text-xs text-stone-500">
-              Cập nhật hồ sơ để chuyên gia phân tích sát thực tế
+              Chọn đánh giá bằng AI hoặc bằng công thức nội bộ:
             </span>
-            <button
-              type="button"
-              onClick={() =>
-                onAskAdvisor(
-                  'Hãy đánh giá nhanh tổng quan thu nhập, cơ cấu chi tiêu và quỹ tiết kiệm hiện tại của tôi, sau đó đề xuất 3 việc nên làm ngay trong tuần này.'
-                )
-              }
-              className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-gradient-to-r from-[#059669] to-[#0D9488] rounded-xl shadow-xs hover:shadow-md transition-all cursor-pointer whitespace-nowrap shrink-0"
-            >
-              <span>Nhờ chuyên gia đánh giá</span>
-              <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  onAskAdvisor(
+                    'Hãy đánh giá nhanh tổng quan thu nhập, cơ cấu chi tiêu và quỹ tiết kiệm hiện tại của tôi, sau đó đề xuất 3 việc nên làm ngay trong tuần này.',
+                    'general',
+                    true
+                  )
+                }
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-gradient-to-r from-[#059669] to-[#0D9488] rounded-xl shadow-xs hover:shadow-md transition-all cursor-pointer whitespace-nowrap"
+              >
+                <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>Đánh giá Có AI</span>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  onAskAdvisor(
+                    'Hãy đánh giá nhanh tổng quan thu nhập, cơ cấu chi tiêu và quỹ tiết kiệm hiện tại của tôi, sau đó đề xuất 3 việc nên làm ngay trong tuần này.',
+                    'general',
+                    false
+                  )
+                }
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-[#B45309] bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <Calculator className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>Đánh giá Không AI</span>
+              </button>
+            </div>
           </div>
         </section>
 

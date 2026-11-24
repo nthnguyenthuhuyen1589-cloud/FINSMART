@@ -1,11 +1,11 @@
 import {
-  ArrowRight,
   BookOpen,
   Calculator,
   CheckCircle2,
   HeartPulse,
   PiggyBank,
   ShieldCheck,
+  Sparkles,
 } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useState } from 'react';
@@ -16,7 +16,8 @@ import { MoneyInput } from './MoneyInput.tsx';
 
 interface FinancialGuideViewProps {
   profile?: FinancialProfile;
-  onAskScenario: (prompt: string, mode?: AdvisoryMode) => void;
+  aiEnabled: boolean;
+  onAskScenario: (prompt: string, mode?: AdvisoryMode, overrideAiEnabled?: boolean) => void;
 }
 
 type ScenarioGroup = 'all' | 'student' | 'early_career' | 'crisis';
@@ -191,7 +192,11 @@ const SAFETY_PRINCIPLES = [
   'Mọi kế hoạch ngân sách đều mang tính linh hoạt: hãy điều chỉnh kịp thời khi thu nhập hoặc hoàn cảnh thay đổi.',
 ];
 
-export function FinancialGuideView({ profile, onAskScenario }: FinancialGuideViewProps) {
+export function FinancialGuideView({
+  profile,
+  aiEnabled,
+  onAskScenario,
+}: FinancialGuideViewProps) {
   const [group, setGroup] = useState<ScenarioGroup>('all');
 
   // Tool 1: Instant Health Check (defaults from profile if available)
@@ -379,19 +384,44 @@ export function FinancialGuideView({ profile, onAskScenario }: FinancialGuideVie
                 </div>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() =>
-                onAskScenario(
-                  `Thu nhập của tôi khoảng ${formatVnd(healthIncome)}/tháng, chi thiết yếu ${formatVnd(healthEssential)}, chi linh hoạt ${formatVnd(healthFlexible)} (còn dư ${formatVnd(healthSurplus)}). Hãy phân tích sức khỏe tài chính và gợi ý cách tối ưu ngay.`,
-                  healthSurplus < 0 ? 'debt_recovery' : 'cut_expenses'
-                )
-              }
-              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-gradient-to-r from-[#059669] to-[#0D9488] rounded-xl shadow-xs hover:shadow-md transition-all cursor-pointer"
-            >
-              <span>Tư vấn tối ưu mức chi này</span>
-              <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  onAskScenario(
+                    `Thu nhập của tôi khoảng ${formatVnd(healthIncome)}/tháng, chi thiết yếu ${formatVnd(healthEssential)}, chi linh hoạt ${formatVnd(healthFlexible)} (còn dư ${formatVnd(healthSurplus)}). Hãy phân tích sức khỏe tài chính và gợi ý cách tối ưu ngay.`,
+                    healthSurplus < 0 ? 'debt_recovery' : 'cut_expenses',
+                    true
+                  )
+                }
+                className={`inline-flex items-center justify-center gap-1 px-2.5 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer ${
+                  aiEnabled
+                    ? 'text-white bg-gradient-to-r from-[#059669] to-[#0D9488] shadow-xs hover:shadow-md'
+                    : 'text-[#0F766E] bg-emerald-50 hover:bg-emerald-100 border border-emerald-200'
+                }`}
+              >
+                <Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span>Tư vấn Có AI</span>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  onAskScenario(
+                    `Thu nhập của tôi khoảng ${formatVnd(healthIncome)}/tháng, chi thiết yếu ${formatVnd(healthEssential)}, chi linh hoạt ${formatVnd(healthFlexible)} (còn dư ${formatVnd(healthSurplus)}). Hãy phân tích sức khỏe tài chính và gợi ý cách tối ưu ngay.`,
+                    healthSurplus < 0 ? 'debt_recovery' : 'cut_expenses',
+                    false
+                  )
+                }
+                className={`inline-flex items-center justify-center gap-1 px-2.5 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer ${
+                  !aiEnabled
+                    ? 'text-white bg-gradient-to-r from-[#B45309] to-[#D97706] shadow-xs hover:shadow-md'
+                    : 'text-[#B45309] bg-amber-50 hover:bg-amber-100 border border-amber-200'
+                }`}
+              >
+                <Calculator className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span>Tính Không AI</span>
+              </button>
+            </div>
           </div>
 
           {/* Card 2: Loan Safety Check */}
@@ -467,19 +497,44 @@ export function FinancialGuideView({ profile, onAskScenario }: FinancialGuideVie
                 </div>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() =>
-                onAskScenario(
-                  `Tôi dự định vay/trả góp ${formatVnd(loanAmount)} trong ${safeMonths} tháng với lãi suất khoảng ${loanAnnualRate}%/năm (góp khoảng ${formatVnd(monthlyInstallment)}/tháng, tổng lãi ${formatVnd(totalInterest)}). Với thu nhập ${formatVnd(healthIncome)}/tháng và phần dư ${formatVnd(healthSurplus)}/tháng, tôi có nên vay không hay nên tích lũy trước?`,
-                  'loan_check'
-                )
-              }
-              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-gradient-to-r from-[#0F766E] to-[#059669] rounded-xl shadow-xs hover:shadow-md transition-all cursor-pointer"
-            >
-              <span>Hỏi chuyên gia về khoản vay này</span>
-              <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  onAskScenario(
+                    `Tôi dự định vay/trả góp ${formatVnd(loanAmount)} trong ${safeMonths} tháng với lãi suất khoảng ${loanAnnualRate}%/năm (góp khoảng ${formatVnd(monthlyInstallment)}/tháng, tổng lãi ${formatVnd(totalInterest)}). Với thu nhập ${formatVnd(healthIncome)}/tháng và phần dư ${formatVnd(healthSurplus)}/tháng, tôi có nên vay không hay nên tích lũy trước?`,
+                    'loan_check',
+                    true
+                  )
+                }
+                className={`inline-flex items-center justify-center gap-1 px-2.5 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer ${
+                  aiEnabled
+                    ? 'text-white bg-gradient-to-r from-[#0F766E] to-[#059669] shadow-xs hover:shadow-md'
+                    : 'text-[#0F766E] bg-emerald-50 hover:bg-emerald-100 border border-emerald-200'
+                }`}
+              >
+                <Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span>Hỏi Có AI</span>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  onAskScenario(
+                    `Tôi dự định vay/trả góp ${formatVnd(loanAmount)} trong ${safeMonths} tháng với lãi suất khoảng ${loanAnnualRate}%/năm (góp khoảng ${formatVnd(monthlyInstallment)}/tháng, tổng lãi ${formatVnd(totalInterest)}). Với thu nhập ${formatVnd(healthIncome)}/tháng và phần dư ${formatVnd(healthSurplus)}/tháng, tôi có nên vay không hay nên tích lũy trước?`,
+                    'loan_check',
+                    false
+                  )
+                }
+                className={`inline-flex items-center justify-center gap-1 px-2.5 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer ${
+                  !aiEnabled
+                    ? 'text-white bg-gradient-to-r from-[#B45309] to-[#D97706] shadow-xs hover:shadow-md'
+                    : 'text-[#B45309] bg-amber-50 hover:bg-amber-100 border border-amber-200'
+                }`}
+              >
+                <Calculator className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span>Đánh giá Không AI</span>
+              </button>
+            </div>
           </div>
 
           {/* Card 3: Savings Speed Planner */}
@@ -530,19 +585,44 @@ export function FinancialGuideView({ profile, onAskScenario }: FinancialGuideVie
                 </div>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() =>
-                onAskScenario(
-                  `Tôi muốn đạt mục tiêu tiết kiệm ${formatVnd(goalAmount)} (hiện đã có ${formatVnd(goalAlreadySaved)}, còn thiếu ${formatVnd(remainingGoalAmount)}) với mức trích khoảng ${formatVnd(goalMonthlySave)}/tháng (dự kiến ${monthsNeeded} tháng, tương đương ${formatVnd(weeklyNeeded)}/tuần). Hãy lập cho tôi lộ trình hành động cụ thể và cách giữ kỷ luật.`,
-                  'savings_goal'
-                )
-              }
-              className="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-gradient-to-r from-[#059669] to-[#0D9488] rounded-xl shadow-xs hover:shadow-md transition-all cursor-pointer"
-            >
-              <span>Lập lộ trình tiết kiệm chi tiết</span>
-              <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() =>
+                  onAskScenario(
+                    `Tôi muốn đạt mục tiêu tiết kiệm ${formatVnd(goalAmount)} (hiện đã có ${formatVnd(goalAlreadySaved)}, còn thiếu ${formatVnd(remainingGoalAmount)}) với mức trích khoảng ${formatVnd(goalMonthlySave)}/tháng (dự kiến ${monthsNeeded} tháng, tương đương ${formatVnd(weeklyNeeded)}/tuần). Hãy lập cho tôi lộ trình hành động cụ thể và cách giữ kỷ luật.`,
+                    'savings_goal',
+                    true
+                  )
+                }
+                className={`inline-flex items-center justify-center gap-1 px-2.5 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer ${
+                  aiEnabled
+                    ? 'text-white bg-gradient-to-r from-[#059669] to-[#0D9488] shadow-xs hover:shadow-md'
+                    : 'text-[#0F766E] bg-emerald-50 hover:bg-emerald-100 border border-emerald-200'
+                }`}
+              >
+                <Sparkles className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span>Lộ trình Có AI</span>
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  onAskScenario(
+                    `Tôi muốn đạt mục tiêu tiết kiệm ${formatVnd(goalAmount)} (hiện đã có ${formatVnd(goalAlreadySaved)}, còn thiếu ${formatVnd(remainingGoalAmount)}) với mức trích khoảng ${formatVnd(goalMonthlySave)}/tháng (dự kiến ${monthsNeeded} tháng, tương đương ${formatVnd(weeklyNeeded)}/tuần). Hãy lập cho tôi lộ trình hành động cụ thể và cách giữ kỷ luật.`,
+                    'savings_goal',
+                    false
+                  )
+                }
+                className={`inline-flex items-center justify-center gap-1 px-2.5 py-2 text-xs font-semibold rounded-xl transition-all cursor-pointer ${
+                  !aiEnabled
+                    ? 'text-white bg-gradient-to-r from-[#B45309] to-[#D97706] shadow-xs hover:shadow-md'
+                    : 'text-[#B45309] bg-amber-50 hover:bg-amber-100 border border-amber-200'
+                }`}
+              >
+                <Calculator className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                <span>Lộ trình Không AI</span>
+              </button>
+            </div>
           </div>
         </div>
       </section>
@@ -574,14 +654,22 @@ export function FinancialGuideView({ profile, onAskScenario }: FinancialGuideVie
               </ul>
             </div>
 
-            <div className="pt-3 border-t border-stone-100 flex justify-end">
+            <div className="pt-3 border-t border-stone-100 flex flex-wrap justify-end gap-2">
               <button
                 type="button"
-                onClick={() => onAskScenario(item.prompt)}
+                onClick={() => onAskScenario(item.prompt, 'general', true)}
                 className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-gradient-to-r from-[#059669] to-[#0D9488] rounded-xl shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all cursor-pointer"
               >
-                <span>Hỏi chuyên gia về tình huống này</span>
-                <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>Hỏi Có AI</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => onAskScenario(item.prompt, 'general', false)}
+                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-[#B45309] bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl transition-colors cursor-pointer"
+              >
+                <Calculator className="h-3.5 w-3.5" aria-hidden="true" />
+                <span>Phân tích Không AI</span>
               </button>
             </div>
           </article>

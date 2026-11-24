@@ -60,9 +60,9 @@ export function DateSelectorVi({
         <button
           type="button"
           onClick={() => onChange(todayIsoDate())}
-          className="text-[11px] font-semibold text-[#0F766E] hover:underline cursor-pointer"
+          className="px-2 py-0.5 text-[11px] font-semibold text-[#0F766E] bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 rounded-md transition-colors cursor-pointer whitespace-nowrap"
         >
-          Hôm nay
+          Ngày hiện tại
         </button>
       </div>
 
